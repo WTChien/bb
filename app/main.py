@@ -97,21 +97,30 @@ class QuestRefreshSettingsUpdate(BaseModel):
 load_dotenv()
 project_root = Path(__file__).resolve().parents[1]
 
-# Render (cloud): set FIREBASE_CREDENTIAL_JSON to the full content of the service account JSON
-_cred_json_str = os.getenv("FIREBASE_CREDENTIAL_JSON")
 credential_dict: dict | None = None
 credential_path: str | None = None
 
-if _cred_json_str:
-    import json as _json
-    credential_dict = _json.loads(_cred_json_str)
+# Priority 1: Render Secret File path
+# - Use FIREBASE_SERVICE_ACCOUNT_FILE for explicit file path
+# - Fallback to common Render secret location
+secret_file_path = os.getenv("FIREBASE_SERVICE_ACCOUNT_FILE", "/etc/secrets/firebase-service-account.json")
+secret_candidate = Path(secret_file_path)
+if secret_candidate.exists():
+    credential_path = str(secret_candidate)
 else:
-    credential_setting = os.getenv("FIREBASE_SERVICE_ACCOUNT") or os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
-    if credential_setting:
-        candidate = Path(credential_setting)
-        if not candidate.is_absolute():
-            candidate = project_root / candidate
-        credential_path = str(candidate)
+    # Priority 2: Render env var JSON
+    _cred_json_str = os.getenv("FIREBASE_CREDENTIAL_JSON")
+    if _cred_json_str:
+        import json as _json
+        credential_dict = _json.loads(_cred_json_str)
+    else:
+        # Priority 3: local dev file path
+        credential_setting = os.getenv("FIREBASE_SERVICE_ACCOUNT") or os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+        if credential_setting:
+            candidate = Path(credential_setting)
+            if not candidate.is_absolute():
+                candidate = project_root / candidate
+            credential_path = str(candidate)
 
 service = FirestoreQuestService(
     project_id=os.getenv("GOOGLE_CLOUD_PROJECT") or None,
