@@ -1,0 +1,376 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Love Quest ✦ 愛的任務板</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <!-- sky layer -->
+    <div class="sky" aria-hidden="true">
+      <span class="cloud c1"></span>
+      <span class="cloud c2"></span>
+      <span class="cloud c3"></span>
+      <span class="star s1">★</span>
+      <span class="star s2">✦</span>
+      <span class="star s3">★</span>
+      <span class="star s4">✧</span>
+    </div>
+
+    <section id="auth-gate" class="auth-gate">
+      <div class="auth-card sign-board">
+        <div class="sign-header">🔐 通關密語</div>
+        <div class="sign-body stack">
+          <p class="auth-hint">提示：通關密語（<button id="quick-user-login" class="hint-link-btn" type="button">咕咕嘎嘎</button>）</p>
+
+          <form id="login-form" class="stack" autocomplete="off">
+            <label class="field-label">通關密語
+              <input id="login-pass" maxlength="40" required type="text" placeholder="輸入通關密語（可輸入中文）" />
+            </label>
+            <button class="btn-wood btn-accent" type="submit">進入系統</button>
+          </form>
+
+          <p id="auth-message" class="auth-message"></p>
+
+          <div class="auth-deco" aria-hidden="true">
+            <img src="/img/nobg_chii.png?v=2" class="auth-deco-img a1" alt="" />
+            <img src="/img/nobg_ha_cheer.png?v=2" class="auth-deco-img a2 quick-admin-trigger" id="quick-admin-login" alt="" title="快速進入管理員" />
+            <img src="/img/nobg_3_nice.png?v=2" class="auth-deco-img a3" alt="" />
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <div id="app-shell" class="app-shell is-hidden">
+
+    <!-- hero banner -->
+    <header class="hero">
+      <div class="hero-inner">
+        <div class="hero-text">
+          <p class="hero-eyebrow">✦ ChiiKawa Party Quest Log ✦</p>
+          <h1 class="hero-title">Chiikawa Love RPG<br><span>討伐日常任務 · 蒐集愛心獎章</span></h1>
+          <p class="hero-sub">和吉伊卡哇小隊一起出發，完成每日與活動任務，升級等級、累積點數、解鎖可愛寶物！</p>
+        </div>
+        <div class="hero-chars">
+          <img src="/img/nobg_ha_cheer.png?v=2" alt="" class="char char-a" />
+          <img src="/img/nobg_3.png?v=2"        alt="" class="char char-b" />
+          <img src="/img/nobg_chii.png?v=2"     alt="" class="char char-c" />
+        </div>
+      </div>
+      <div class="grass-strip" aria-hidden="true"></div>
+    </header>
+
+    <!-- ground / content area -->
+    <main class="ground">
+      <div class="page">
+
+        <!-- top status bar -->
+        <div class="status-bar">
+          <div class="status-player">
+            <span class="status-label">玩家</span>
+            <span id="user-id-label" class="player-name"></span>
+            <button id="refresh-btn" class="btn-wood btn-sm" type="button">🔄 更新</button>
+            <button id="logout-btn" class="btn-wood btn-sm btn-logout" type="button">↩ 登出</button>
+          </div>
+          <div class="status-points">
+            <span class="pts-icon">💕</span>
+            <span class="pts-num" id="stat-points">0</span>
+            <span class="pts-label">點</span>
+          </div>
+          <div class="status-counts">
+            <button id="nav-announce-btn" class="count-chip chip-btn" type="button">📢 公告欄</button>
+            <button id="nav-quests-btn" class="count-chip chip-btn nav-active" type="button">✅ 任務</button>
+            <button id="open-mall-btn" class="count-chip chip-btn" type="button">🎁 獎勵兌換</button>
+            <button id="open-giftbox-btn" class="count-chip chip-btn giftbox-btn" type="button" aria-label="禮物盒">
+              🎁 禮物盒
+              <span id="giftbox-badge" class="giftbox-badge is-hidden">0</span>
+            </button>
+          </div>
+          <div id="message" class="status-msg"></div>
+        </div>
+
+        <!-- main content (single panel navigation) -->
+        <div class="page-views stack">
+
+          <!-- Announcement View -->
+          <div id="view-announce" class="view-panel is-hidden">
+            <div id="admin-announce-form-panel" class="sign-board admin-form-panel is-hidden">
+              <div class="sign-header"><img src="/img/nobg_study.png?v=2" class="hd-icon" alt=""> 📢 新增公告</div>
+              <form id="announcement-form" class="sign-body stack">
+                <label class="field-label">公告標題
+                  <input id="ann-title" required maxlength="80" />
+                </label>
+                <label class="field-label">公告內容
+                  <textarea id="ann-content" required maxlength="400"></textarea>
+                </label>
+                <label class="field-label">公告類型
+                  <select id="ann-type">
+                    <option value="system">系統公告</option>
+                    <option value="event">活動公告</option>
+                  </select>
+                </label>
+                <label class="field-label" id="ann-event-time-wrap">活動時間說明（選填）
+                  <input id="ann-event-time" maxlength="80" placeholder="例：今天 14:00-18:00 分數加倍" />
+                </label>
+                <button class="btn-wood btn-brand" type="submit">📢 發布公告</button>
+              </form>
+            </div>
+            <div id="announcements-board" class="sign-board">
+              <div class="sign-header"><img src="/img/nobg_shisho.png?v=2" class="hd-icon" alt=""> 📢 公告欄</div>
+              <div class="sign-body">
+                <div id="announcement-list" class="list"></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Quest View (default) -->
+          <div id="view-quests" class="view-panel">
+            <div class="admin-quest-top-row admin-form-panel is-hidden">
+            <div id="admin-quest-form-panel" class="sign-board">
+              <div class="sign-header"><img src="/img/nobg_study.png?v=2" class="hd-icon" alt=""> 📋 新增任務</div>
+              <form id="quest-form" class="sign-body stack">
+                <label class="field-label">任務名稱
+                  <input id="q-title" required maxlength="80" />
+                </label>
+                <label class="field-label">任務描述
+                  <textarea id="q-description" required maxlength="240"></textarea>
+                </label>
+                <label class="field-label">可得點數
+                  <input id="q-points" type="number" min="1" max="999" required />
+                </label>
+                <label class="field-label">任務難度
+                  <select id="q-difficulty" required>
+                    <option value="easy">簡單</option>
+                    <option value="medium">普通</option>
+                    <option value="hard">困難</option>
+                  </select>
+                </label>
+                <label class="field-label">發布日期
+                  <input id="q-published-date" type="date" />
+                </label>
+                <label class="field-label">任務截止日期
+                  <input id="q-due-date" type="date" />
+                </label>
+                <button id="quest-submit-btn" class="btn-wood btn-brand" type="submit">＋ 建立任務</button>
+              </form>
+            </div>
+            <div id="admin-review-board" class="sign-board">
+              <div class="sign-header"><img src="/img/nobg_shisho.png?v=2" class="hd-icon" alt=""> ✅ 任務審核（待審 <span id="submission-pending-count">0</span>）</div>
+              <div class="sign-body">
+                <div id="submission-list" class="list"></div>
+              </div>
+            </div>
+            </div><!-- end admin-quest-top-row -->
+            <div class="sign-board">
+              <div class="sign-header"><img src="/img/nobg_shisho.png?v=2" class="hd-icon" alt=""> ⚔️ 任務清單</div>
+              <div class="sign-body">
+                <div id="admin-quest-tools" class="admin-form-panel is-hidden stack">
+                  <div class="quest-admin-actions">
+                    <button id="delete-selected-quests-btn" class="btn-wood btn-sm btn-brand" type="button">刪除勾選任務</button>
+                    <button id="delete-all-quests-btn" class="btn-wood btn-sm btn-brand" type="button">刪除全部任務</button>
+                  </div>
+                  <div class="quest-refresh-controls">
+                    <label class="field-label">每日刷新數量
+                      <input id="refresh-daily-count" type="number" min="0" max="30" />
+                    </label>
+                    <label class="field-label">每周刷新數量
+                      <input id="refresh-weekly-count" type="number" min="0" max="30" />
+                    </label>
+                    <button id="save-refresh-settings-btn" class="btn-wood btn-sm" type="button">儲存刷新設定</button>
+                    <button id="refresh-from-db-btn" class="btn-wood btn-sm btn-accent" type="button">依設定刷新任務</button>
+                  </div>
+                </div>
+                <div id="quest-category-nav" class="quest-category-nav"></div>
+                <div class="quest-toolbar">
+                  <label class="field-label">排序方式
+                    <select id="quest-sort-by">
+                      <option value="published_date">發布日期</option>
+                      <option value="points">獎勵金</option>
+                      <option value="difficulty">任務難度</option>
+                    </select>
+                  </label>
+                  <label class="field-label">排序方向
+                    <select id="quest-sort-order">
+                      <option value="desc">由高到低 / 新到舊</option>
+                      <option value="asc">由低到高 / 舊到新</option>
+                    </select>
+                  </label>
+                  <label class="field-label">難度篩選
+                    <select id="quest-filter-difficulty">
+                      <option value="all">全部</option>
+                      <option value="easy">簡單</option>
+                      <option value="medium">普通</option>
+                      <option value="hard">困難</option>
+                    </select>
+                  </label>
+                </div>
+                <div id="quest-list" class="list"></div>
+                <div id="admin-template-board" class="admin-form-panel is-hidden stack">
+                  <div class="sign-subtitle">任務資料庫</div>
+                  <form id="template-form" class="stack">
+                    <label class="field-label">任務名稱
+                      <input id="t-title" maxlength="80" required />
+                    </label>
+                    <label class="field-label">任務描述
+                      <textarea id="t-description" maxlength="240" required></textarea>
+                    </label>
+                    <label class="field-label">可得點數
+                      <input id="t-points" type="number" min="1" max="999" required />
+                    </label>
+                    <label class="field-label">任務難度
+                      <select id="t-difficulty">
+                        <option value="easy">簡單</option>
+                        <option value="medium">普通</option>
+                        <option value="hard">困難</option>
+                      </select>
+                    </label>
+                    <label class="field-label">任務分類
+                      <select id="t-category">
+                        <option value="daily">每日</option>
+                        <option value="weekly">每週</option>
+                        <option value="event">活動</option>
+                        <option value="other">其他</option>
+                      </select>
+                    </label>
+                    <label class="field-label">預設截止天數
+                      <input id="t-due-days" type="number" min="0" max="365" value="7" />
+                    </label>
+                    <button class="btn-wood btn-accent" type="submit">新增到任務資料庫</button>
+                  </form>
+                  <label class="field-label">搜尋任務資料庫
+                    <input id="template-search" placeholder="輸入任務名稱關鍵字" />
+                  </label>
+                  <div id="template-list" class="list"></div>
+                </div>
+                <div id="admin-deleted-quests-board" class="admin-form-panel is-hidden stack">
+                  <div class="sign-subtitle">最近刪除</div>
+                  <div id="deleted-quest-list" class="list"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Mall View -->
+          <div id="view-mall" class="view-panel is-hidden">
+            <div id="admin-reward-form-panel" class="sign-board admin-form-panel is-hidden">
+              <div class="sign-header"><img src="/img/nobg_lion.png?v=2" class="hd-icon" alt=""> 🎁 新增獎勵</div>
+              <form id="reward-form" class="sign-body stack">
+                <label class="field-label">獎勵名稱
+                  <input id="r-title" required maxlength="80" />
+                </label>
+                <label class="field-label">獎勵描述
+                  <textarea id="r-description" required maxlength="240"></textarea>
+                </label>
+                <label class="field-label">兌換點數
+                  <input id="r-cost" type="number" min="1" max="9999" required />
+                </label>
+                <label class="field-label">圖片路徑
+                  <input id="r-image" maxlength="120" placeholder="/img/chii_sleep.png" />
+                </label>
+                <label class="field-label">或上傳圖片
+                  <input id="r-image-file" type="file" accept="image/*" />
+                </label>
+                <button class="btn-wood btn-accent" type="submit">＋ 建立獎勵</button>
+              </form>
+            </div>
+            <div id="admin-gift-dispatch-panel" class="sign-board admin-form-panel is-hidden">
+              <div class="sign-header"><img src="/img/nobg_lion.png?v=2" class="hd-icon" alt=""> 🎁 派發禮物</div>
+              <form id="giftbox-send-form" class="sign-body stack">
+                <label class="field-label">收件人 ID
+                  <input id="g-user-id" maxlength="80" placeholder="例如：郭芸甄" required />
+                </label>
+                <label class="field-label">信件標題
+                  <input id="g-title" maxlength="80" required />
+                </label>
+                <label class="field-label">信件內容
+                  <textarea id="g-content" maxlength="400" required></textarea>
+                </label>
+                <label class="field-label">附件名稱（選填）
+                  <input id="g-attachment-title" maxlength="80" placeholder="有填寫才會附上禮物" />
+                </label>
+                <label class="field-label">附件描述（選填）
+                  <textarea id="g-attachment-description" maxlength="240"></textarea>
+                </label>
+                <label class="field-label">附件圖片路徑（選填）
+                  <input id="g-attachment-image" maxlength="240" placeholder="/img/nobg_chii.png?v=2" />
+                </label>
+                <button class="btn-wood btn-accent" type="submit">📮 發送信件</button>
+              </form>
+            </div>
+            <div id="mall-nav" class="quest-category-nav"></div>
+            <div id="mall-reward-board" class="sign-board">
+              <div class="sign-header"><img src="/img/nobg_3_nice.png?v=2" class="hd-icon" alt=""> 🌟 獎勵商城</div>
+              <div class="sign-body">
+                <div id="reward-list"></div>
+              </div>
+            </div>
+            <div id="player-claim-history-board" class="sign-board">
+              <div class="sign-header"><img src="/img/nobg_chii.png?v=2" class="hd-icon" alt=""> 🧾 兌換歷史紀錄</div>
+              <div class="sign-body">
+                <div id="player-claim-history-list" class="list"></div>
+              </div>
+            </div>
+            <div id="admin-claims-board" class="sign-board is-hidden">
+              <div class="sign-header"><img src="/img/nobg_lion.png?v=2" class="hd-icon" alt=""> 📦 兌換管理</div>
+              <div class="sign-body">
+                <div id="claim-list" class="list"></div>
+              </div>
+            </div>
+            <div id="admin-gift-history-board" class="sign-board admin-form-panel is-hidden">
+              <div class="sign-header"><img src="/img/nobg_ha_cheer.png?v=2" class="hd-icon" alt=""> 🧾 送禮歷史</div>
+              <div class="sign-body">
+                <div id="gift-history-list" class="list"></div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- deco mascots on ground -->
+      <img src="/img/nobg_liz.png?v=2"  class="ground-char gc-left"  alt="" aria-hidden="true" />
+      <img src="/img/nobg_3_2.png?v=2" class="ground-char gc-right" alt="" aria-hidden="true" />
+    </main>
+
+    <!-- Image lightbox overlay -->
+    <div id="img-lightbox" class="img-lightbox is-hidden" role="dialog" aria-modal="true" aria-label="圖片放大">
+      <button id="img-lightbox-close" class="lightbox-close" type="button" aria-label="關閉">✖</button>
+      <img id="img-lightbox-img" class="lightbox-img" src="" alt="放大查看" />
+    </div>
+
+    <div id="giftbox-modal" class="giftbox-modal is-hidden" role="dialog" aria-modal="true" aria-label="禮物盒">
+      <div class="giftbox-modal-panel sign-board">
+        <div class="sign-header">
+          <img src="/img/nobg_3_nice.png?v=2" class="hd-icon" alt=""> 🎁 禮物盒
+          <button id="giftbox-close-btn" class="lightbox-close giftbox-close-btn" type="button" aria-label="關閉">✖</button>
+        </div>
+        <div class="sign-body stack">
+          <div class="giftbox-toolbar">
+            <button id="giftbox-claim-all-btn" class="btn-wood btn-sm btn-accent" type="button">一鍵領取所有附件</button>
+            <button id="giftbox-read-all-btn" class="btn-wood btn-sm" type="button">一鍵已讀所有信件</button>
+            <button id="giftbox-delete-read-btn" class="btn-wood btn-sm btn-brand" type="button">一鍵刪除所有已讀信件</button>
+          </div>
+          <div id="giftbox-list" class="list"></div>
+        </div>
+      </div>
+    </div>
+
+    <div id="confirm-modal" class="confirm-modal is-hidden" role="dialog" aria-modal="true" aria-label="確認">
+      <div class="confirm-panel sign-board">
+        <div class="sign-header">⚠ 提醒</div>
+        <div class="sign-body stack">
+          <div id="confirm-message" class="muted"></div>
+          <div class="confirm-actions">
+            <button id="confirm-cancel-btn" class="btn-wood btn-sm" type="button">取消</button>
+            <button id="confirm-ok-btn" class="btn-wood btn-sm btn-brand" type="button">確定刪除</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    </div>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>
