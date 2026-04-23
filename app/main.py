@@ -69,9 +69,7 @@ class GiftboxSendCreate(BaseModel):
     user_id: str = Field(min_length=1, max_length=80)
     title: str = Field(min_length=1, max_length=80)
     content: str = Field(min_length=1, max_length=400)
-    attachment_title: str = Field(default="", max_length=80)
-    attachment_description: str = Field(default="", max_length=240)
-    attachment_image_path: str = Field(default="", max_length=240)
+    points: int = Field(default=0, ge=0, le=99999)
 
 
 class GiftboxDeleteReadRequest(BaseModel):
@@ -98,17 +96,27 @@ class QuestRefreshSettingsUpdate(BaseModel):
 
 load_dotenv()
 project_root = Path(__file__).resolve().parents[1]
-credential_setting = os.getenv("FIREBASE_SERVICE_ACCOUNT") or os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+
+# Render (cloud): set FIREBASE_CREDENTIAL_JSON to the full content of the service account JSON
+_cred_json_str = os.getenv("FIREBASE_CREDENTIAL_JSON")
+credential_dict: dict | None = None
 credential_path: str | None = None
-if credential_setting:
-    candidate = Path(credential_setting)
-    if not candidate.is_absolute():
-        candidate = project_root / candidate
-    credential_path = str(candidate)
+
+if _cred_json_str:
+    import json as _json
+    credential_dict = _json.loads(_cred_json_str)
+else:
+    credential_setting = os.getenv("FIREBASE_SERVICE_ACCOUNT") or os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+    if credential_setting:
+        candidate = Path(credential_setting)
+        if not candidate.is_absolute():
+            candidate = project_root / candidate
+        credential_path = str(candidate)
 
 service = FirestoreQuestService(
     project_id=os.getenv("GOOGLE_CLOUD_PROJECT") or None,
     credential_path=credential_path,
+    credential_dict=credential_dict,
 )
 
 app = FastAPI(title="Love Quest", version="1.0.0")

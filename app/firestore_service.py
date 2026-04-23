@@ -22,9 +22,25 @@ class ActionResult:
 
 
 class FirestoreQuestService:
-    def __init__(self, project_id: str | None = None, credential_path: str | None = None) -> None:
+    def __init__(
+        self,
+        project_id: str | None = None,
+        credential_path: str | None = None,
+        credential_dict: dict | None = None,
+    ) -> None:
         resolved_credential_path: str | None = None
 
+        # Priority 1: credential dict (from env var JSON string on Render)
+        if credential_dict:
+            if not firebase_admin._apps:
+                firebase_admin.initialize_app(fb_credentials.Certificate(credential_dict))
+            self.db = firestore.Client.from_service_account_info(
+                credential_dict,
+                project=project_id,
+            )
+            return
+
+        # Priority 2: credential file path (local dev)
         if credential_path:
             path = Path(credential_path).expanduser()
             if path.exists():
@@ -887,23 +903,15 @@ class FirestoreQuestService:
         if not user_id:
             return {"ok": False, "message": "使用者不可為空"}
 
-        attachment_title = str(payload.get("attachment_title", "")).strip()
-        attachment_description = str(payload.get("attachment_description", "")).strip()
-        attachment_image_path = str(payload.get("attachment_image_path", "")).strip()
-        has_attachment = bool(attachment_title)
+        points = max(0, int(payload.get("points", 0) or 0))
 
         data = {
             "user_id": user_id,
             "title": str(payload.get("title", "")).strip(),
             "content": str(payload.get("content", "")).strip(),
             "is_read": False,
-            "has_attachment": has_attachment,
-            "attachment_claimed": False,
-            "attachment": {
-                "title": attachment_title,
-                "description": attachment_description,
-                "image_path": attachment_image_path,
-            },
+            "points": points,
+            "points_claimed": False,
             "is_deleted": False,
             "created_at": SERVER_TIMESTAMP,
             "updated_at": SERVER_TIMESTAMP,
@@ -922,12 +930,11 @@ class FirestoreQuestService:
                 "user_id": user_id,
                 "title": data["title"],
                 "content": data["content"],
-                "has_attachment": data["has_attachment"],
-                "attachment_title": attachment_title,
+                "points": points,
                 "created_at": SERVER_TIMESTAMP,
             }
         )
-        return {"ok": True, "id": ref.id, "message": "禮物信件已送出"}
+        return {"ok": True, "id": ref.id, "message": "點數信件已送出"}
 
     def get_giftbox_send_history(self) -> list[dict[str, Any]]:
         docs = self.db.collection("giftbox_send_history").stream()
@@ -962,13 +969,7 @@ class FirestoreQuestService:
             .collection("giftbox_mails")
             .document(mail_id)
         )
-        claimed_ref = (
-            self.db.collection("users")
-            .document(user_id)
-            .collection("claimed_rewards")
-            .document(f"giftbox_{mail_id}")
-        )
-        claim_log_ref = self.db.collection("reward_claims").document(f"{user_id}__giftbox_{mail_id}")
+        stats_ref = self._stats_ref(user_id)
 
         transaction = self.db.transaction()
 
@@ -981,37 +982,28 @@ class FirestoreQuestService:
             mail = mail_snapshot.to_dict() or {}
             if bool(mail.get("is_deleted", False)):
                 return {"ok": False, "message": "信件已刪除"}
-            if not bool(mail.get("has_attachment", False)):
-                return {"ok": False, "message": "此信件沒有附件"}
-            if bool(mail.get("attachment_claimed", False)):
-                return {"ok": False, "message": "附件已領取"}
+            points = int(mail.get("points", 0) or 0)
+            if points <= 0:
+                return {"ok": False, "message": "此信件沒有點數"}
+            if bool(mail.get("points_claimed", False)):
+                return {"ok": False, "message": "點數已領取"}
 
-            attachment = mail.get("attachment", {}) or {}
-            reward_data = {
-                "user_id": user_id,
-                "reward_id": f"giftbox_{mail_id}",
-                "title": str(attachment.get("title", "神秘禮物")),
-                "description": str(attachment.get("description", "來自禮物盒附件")),
-                "cost_points": 0,
-                "image_path": str(attachment.get("image_path", "")),
-                "status": "delivered",
-                "claimed_at": SERVER_TIMESTAMP,
-                "updated_at": SERVER_TIMESTAMP,
-                "source": "giftbox",
-            }
+            stats_snapshot = stats_ref.get(transaction=transaction_obj)
+            stats = stats_snapshot.to_dict() or {} if stats_snapshot.exists else {}
+            current_points = int(stats.get("points", 0))
+            new_points = current_points + points
 
-            transaction_obj.set(claimed_ref, reward_data, merge=True)
-            transaction_obj.set(claim_log_ref, reward_data, merge=True)
+            transaction_obj.set(stats_ref, {"points": new_points}, merge=True)
             transaction_obj.set(
                 mail_ref,
                 {
                     "is_read": True,
-                    "attachment_claimed": True,
+                    "points_claimed": True,
                     "updated_at": SERVER_TIMESTAMP,
                 },
                 merge=True,
             )
-            return {"ok": True, "message": "附件領取成功"}
+            return {"ok": True, "message": f"已領取 +{points} 點", "points": new_points}
 
         return _transaction_body(transaction)
 
@@ -1020,14 +1012,15 @@ class FirestoreQuestService:
         target_ids = [
             str(m.get("id", ""))
             for m in mails
-            if bool(m.get("has_attachment", False)) and not bool(m.get("attachment_claimed", False))
+            if int(m.get("points", 0) or 0) > 0 and not bool(m.get("points_claimed", False))
         ]
         claimed = 0
+        total_points = 0
         for mail_id in target_ids:
             result = self.claim_giftbox_attachment(user_id=user_id, mail_id=mail_id)
             if result.get("ok"):
                 claimed += 1
-        return {"ok": True, "message": f"已領取 {claimed} 個附件", "claimed_count": claimed}
+        return {"ok": True, "message": f"已領取 {claimed} 封信件的點數", "claimed_count": claimed}
 
     def mark_all_giftbox_read(self, user_id: str) -> dict[str, Any]:
         docs = (

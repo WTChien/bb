@@ -275,7 +275,7 @@
               </form>
             </div>
             <div id="admin-gift-dispatch-panel" class="sign-board admin-form-panel is-hidden">
-              <div class="sign-header"><img src="/img/nobg_lion.png?v=2" class="hd-icon" alt=""> 🎁 派發禮物</div>
+              <div class="sign-header"><img src="/img/nobg_lion.png?v=2" class="hd-icon" alt=""> 💰 派發點數</div>
               <form id="giftbox-send-form" class="sign-body stack">
                 <label class="field-label">收件人 ID
                   <input id="g-user-id" maxlength="80" placeholder="例如：郭芸甄" required />
@@ -286,14 +286,8 @@
                 <label class="field-label">信件內容
                   <textarea id="g-content" maxlength="400" required></textarea>
                 </label>
-                <label class="field-label">附件名稱（選填）
-                  <input id="g-attachment-title" maxlength="80" placeholder="有填寫才會附上禮物" />
-                </label>
-                <label class="field-label">附件描述（選填）
-                  <textarea id="g-attachment-description" maxlength="240"></textarea>
-                </label>
-                <label class="field-label">附件圖片路徑（選填）
-                  <input id="g-attachment-image" maxlength="240" placeholder="/img/nobg_chii.png?v=2" />
+                <label class="field-label">贈送點數（選填，0 表示純訊息）
+                  <input id="g-points" type="number" min="0" max="99999" value="0" />
                 </label>
                 <button class="btn-wood btn-accent" type="submit">📮 發送信件</button>
               </form>
@@ -347,7 +341,7 @@
         </div>
         <div class="sign-body stack">
           <div class="giftbox-toolbar">
-            <button id="giftbox-claim-all-btn" class="btn-wood btn-sm btn-accent" type="button">一鍵領取所有附件</button>
+            <button id="giftbox-claim-all-btn" class="btn-wood btn-sm btn-accent" type="button">一鍵領取所有點數</button>
             <button id="giftbox-read-all-btn" class="btn-wood btn-sm" type="button">一鍵已讀所有信件</button>
             <button id="giftbox-delete-read-btn" class="btn-wood btn-sm btn-brand" type="button">一鍵刪除所有已讀信件</button>
           </div>

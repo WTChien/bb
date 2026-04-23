@@ -319,7 +319,9 @@ function showConfirmModal(message) {
 function renderGiftboxBadge() {
   const badge = $("#giftbox-badge");
   if (!badge) return;
-  const count = state.giftboxMails.length;
+  const count = state.giftboxMails.filter(
+    (m) => !m.is_read || (Number(m.points || 0) > 0 && !m.points_claimed)
+  ).length;
   if (count > 0) {
     badge.textContent = String(count);
     badge.classList.remove("is-hidden");
@@ -340,8 +342,8 @@ function renderGiftbox() {
   }
 
   state.giftboxMails.forEach((mail) => {
-    const hasAttachment = !!mail.has_attachment;
-    const claimed = !!mail.attachment_claimed;
+    const pts = Number(mail.points || 0);
+    const claimed = !!mail.points_claimed;
     const isRead = !!mail.is_read;
     const row = document.createElement("article");
     row.className = `item giftbox-item${isRead ? " is-read" : ""}`;
@@ -349,15 +351,15 @@ function renderGiftbox() {
       <div class="giftbox-row-main">
         <div class="giftbox-row-title">${mail.title || "未命名信件"}</div>
         <div class="giftbox-row-right">
-          ${hasAttachment ? `<span class="giftbox-attachment-icon" title="含附件">📎${claimed ? "✓" : ""}</span>` : ""}
+          ${pts > 0 ? `<span class="giftbox-attachment-icon" title="含點數">💰${claimed ? "✓" : ""}</span>` : ""}
           ${!isRead ? '<span class="pill">未讀</span>' : '<span class="pill">已讀</span>'}
         </div>
       </div>
       <div class="muted">${mail.content || ""}</div>
-      ${hasAttachment ? `<div class="muted">附件：${mail.attachment?.title || "神秘禮物"}</div>` : ""}
+      ${pts > 0 ? `<div class="muted">點數：+${pts} 點</div>` : ""}
       <div class="giftbox-row-actions">
-        ${hasAttachment
-          ? `<button class="btn-wood btn-sm btn-accent" data-mail-claim="${mail.id}" ${claimed ? "disabled" : ""}>${claimed ? "已領取" : "領取附件"}</button>`
+        ${pts > 0
+          ? `<button class="btn-wood btn-sm btn-accent" data-mail-claim="${mail.id}" ${claimed ? "disabled" : ""}>${claimed ? "已領取" : `領取 +${pts} 點`}</button>`
           : ""}
       </div>
     `;
@@ -380,11 +382,10 @@ function renderGiftHistory() {
     item.innerHTML = `
       <div class="item-head">
         <strong>${h.title || "未命名信件"}</strong>
-        <span class="pill">${h.has_attachment ? "有附件" : "無附件"}</span>
+        <span class="pill">${h.points > 0 ? `+${h.points} 點` : "純訊息"}</span>
       </div>
       <div class="muted">收件人：${h.user_id || "-"}</div>
       <div class="muted">內容：${h.content || ""}</div>
-      ${h.attachment_title ? `<div class="muted">附件：${h.attachment_title}</div>` : ""}
     `;
     list.appendChild(item);
   });
@@ -797,9 +798,7 @@ async function createGiftboxMail(event) {
       user_id: $("#g-user-id").value.trim(),
       title: $("#g-title").value.trim(),
       content: $("#g-content").value.trim(),
-      attachment_title: $("#g-attachment-title").value.trim(),
-      attachment_description: $("#g-attachment-description").value.trim(),
-      attachment_image_path: $("#g-attachment-image").value.trim(),
+      points: Number($("#g-points").value) || 0,
     };
     await api("/api/giftbox/send", {
       method: "POST",
@@ -807,7 +806,7 @@ async function createGiftboxMail(event) {
     });
     event.target.reset();
     $("#g-user-id").value = DEFAULT_USER_ID;
-    setMessage("禮物信件發送成功");
+    setMessage("點數信件發送成功");
     await refreshAll();
   } catch (err) {
     btnRestore(btn);
@@ -823,7 +822,7 @@ async function onGiftboxListClick(event) {
   btnLoading(btn);
   try {
     await api(`/api/giftbox/${encodeURIComponent(state.userId)}/${mailId}/claim`, { method: "POST" });
-    setMessage("附件領取成功");
+    setMessage("點數領取成功");
   } catch (err) {
     btnRestore(btn);
     setMessage(err.message, true);
@@ -841,7 +840,7 @@ async function onGiftboxToolbarClick(event) {
     btnLoading(claimAllBtn);
     try {
       const result = await api(`/api/giftbox/${encodeURIComponent(state.userId)}/claim-all`, { method: "POST" });
-      setMessage(result.message || "附件已全部領取");
+      setMessage(result.message || "點數已全部領取");
     } catch (err) {
       btnRestore(claimAllBtn);
       setMessage(err.message, true);

@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: love-quest
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: FIREBASE_CREDENTIAL_JSON
+        sync: false   # 在 Render Dashboard 手動貼上 JSON 內容
+      - key: PYTHON_VERSION
+        value: "3.12"
