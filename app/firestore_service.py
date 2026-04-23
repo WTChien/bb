@@ -57,6 +57,11 @@ GACHA_CHEST_CONFIG: dict[str, dict[str, Any]] = {
         ],
     },
 }
+GACHA_INVENTORY_DEFAULT: dict[str, dict[str, int]] = {
+    "bronze": {"SSS": 150, "S": 600, "A": 2000, "B": 3000},
+    "silver": {"SSS": 150, "S": 700, "A": 1900, "B": 2800},
+    "gold": {"SSS": 180, "S": 850, "A": 1700, "B": 2400},
+}
 
 
 class FirestoreQuestService:
@@ -564,12 +569,58 @@ class FirestoreQuestService:
     def _gacha_state_ref(self, user_id: str):
         return self.db.collection("users").document(user_id).collection("meta").document("gacha_state")
 
+    def _gacha_inventory_ref(self):
+        return self.db.collection("meta").document("gacha_inventory")
+
+    @staticmethod
+    def _normalize_gacha_inventory(raw: dict[str, Any] | None) -> dict[str, dict[str, int]]:
+        raw = raw or {}
+        normalized: dict[str, dict[str, int]] = {}
+        for chest_key, chest in GACHA_CHEST_CONFIG.items():
+            ranks = {str(item.get("rank", "")): 0 for item in chest.get("pool", [])}
+            src = raw.get(chest_key, {}) if isinstance(raw.get(chest_key), dict) else {}
+            normalized[chest_key] = {}
+            for rank in ranks:
+                base = int(GACHA_INVENTORY_DEFAULT.get(chest_key, {}).get(rank, 0))
+                value = src.get(rank, base)
+                try:
+                    normalized[chest_key][rank] = max(0, int(value))
+                except Exception:
+                    normalized[chest_key][rank] = max(0, base)
+        return normalized
+
+    @staticmethod
+    def _calc_rtp_percent(chest: dict[str, Any]) -> float:
+        cost = float(chest.get("cost", 1) or 1)
+        expected = 0.0
+        for item in chest.get("pool", []):
+            expected += float(item.get("points", 0)) * float(item.get("rate", 0))
+        return round((expected / cost) * 100.0, 2)
+
+    @staticmethod
+    def _calc_inventory_rtp_percent(chest: dict[str, Any], inventory: dict[str, int]) -> float:
+        cost = float(chest.get("cost", 1) or 1)
+        pool = chest.get("pool", [])
+        total = 0
+        reward_total = 0.0
+        for item in pool:
+            rank = str(item.get("rank", ""))
+            count = max(0, int(inventory.get(rank, 0)))
+            total += count
+            reward_total += float(item.get("points", 0)) * count
+        if total <= 0:
+            return 0.0
+        return round((reward_total / (cost * total)) * 100.0, 2)
+
     @staticmethod
     def _weighted_roll(pool: list[dict[str, Any]]) -> dict[str, Any]:
-        r = random.random()
+        total_rate = sum(max(0.0, float(item.get("rate", 0.0))) for item in pool)
+        if total_rate <= 0:
+            return pool[-1]
+        r = random.random() * total_rate
         acc = 0.0
         for item in pool:
-            acc += float(item.get("rate", 0.0))
+            acc += max(0.0, float(item.get("rate", 0.0)))
             if r <= acc:
                 return item
         return pool[-1]
@@ -584,6 +635,42 @@ class FirestoreQuestService:
             "pity_limit": GACHA_PITY_LIMIT,
         }
 
+    def get_gacha_overview(self, user_id: str) -> dict[str, Any]:
+        pity = self.get_gacha_pity(user_id)
+        inventory_snapshot = self._gacha_inventory_ref().get()
+        raw_inventory = inventory_snapshot.to_dict() if inventory_snapshot.exists else {}
+        inventory = self._normalize_gacha_inventory(raw_inventory)
+
+        chests: dict[str, Any] = {}
+        for chest_key, chest in GACHA_CHEST_CONFIG.items():
+            chest_inventory = inventory.get(chest_key, {})
+            pool_out: list[dict[str, Any]] = []
+            for item in chest.get("pool", []):
+                rank = str(item.get("rank", ""))
+                pool_out.append({
+                    "rank": rank,
+                    "points": int(item.get("points", 0)),
+                    "rate": float(item.get("rate", 0.0)),
+                    "remaining": int(chest_inventory.get(rank, 0)),
+                })
+
+            configured_rtp = self._calc_rtp_percent(chest)
+            inventory_rtp = self._calc_inventory_rtp_percent(chest, chest_inventory)
+            chests[chest_key] = {
+                "cost": int(chest.get("cost", 0)),
+                "pool": pool_out,
+                "configured_rtp_percent": configured_rtp,
+                "configured_house_edge_percent": round(100.0 - configured_rtp, 2),
+                "inventory_rtp_percent": inventory_rtp,
+                "inventory_house_edge_percent": round(100.0 - inventory_rtp, 2),
+            }
+
+        return {
+            "pity": pity,
+            "pity_limit": GACHA_PITY_LIMIT,
+            "chests": chests,
+        }
+
     def draw_gacha(self, user_id: str, chest_type: str) -> dict[str, Any]:
         chest = GACHA_CHEST_CONFIG.get(chest_type)
         if not chest:
@@ -591,15 +678,20 @@ class FirestoreQuestService:
 
         stats_ref = self._stats_ref(user_id)
         gacha_ref = self._gacha_state_ref(user_id)
+        inventory_ref = self._gacha_inventory_ref()
         transaction = self.db.transaction()
 
         @firestore.transactional
         def _tx(transaction_obj):
             stats_snapshot = stats_ref.get(transaction=transaction_obj)
             gacha_snapshot = gacha_ref.get(transaction=transaction_obj)
+            inventory_snapshot = inventory_ref.get(transaction=transaction_obj)
 
             stats = stats_snapshot.to_dict() if stats_snapshot.exists else {}
             gacha_state = gacha_snapshot.to_dict() if gacha_snapshot.exists else {}
+            inventory_raw = inventory_snapshot.to_dict() if inventory_snapshot.exists else {}
+            inventory = self._normalize_gacha_inventory(inventory_raw)
+            chest_inventory = inventory.get(chest_type, {})
 
             current_points = int(stats.get("points", 0))
             chest_cost = int(chest["cost"])
@@ -614,17 +706,33 @@ class FirestoreQuestService:
             next_count = current_pity + 1
 
             guaranteed = next_count >= GACHA_PITY_LIMIT
-            if guaranteed:
-                reward = next((x for x in chest["pool"] if x.get("rank") == "SSS"), chest["pool"][0])
-            else:
-                reward = self._weighted_roll(chest["pool"])
+            available_pool = [
+                item for item in chest["pool"]
+                if int(chest_inventory.get(str(item.get("rank", "")), 0)) > 0
+            ]
+            if not available_pool:
+                return {
+                    "ok": False,
+                    "message": f"{chest_type} 寶箱已抽完，請稍後補貨",
+                    "points": current_points,
+                }
 
-            is_sss = str(reward.get("rank", "")).upper() == "SSS"
+            if guaranteed and int(chest_inventory.get("SSS", 0)) > 0:
+                reward = next((x for x in chest["pool"] if str(x.get("rank", "")) == "SSS"), available_pool[0])
+            else:
+                reward = self._weighted_roll(available_pool)
+
+            reward_rank = str(reward.get("rank", "B"))
+            chest_inventory[reward_rank] = max(0, int(chest_inventory.get(reward_rank, 0)) - 1)
+            inventory[chest_type] = chest_inventory
+
+            is_sss = reward_rank.upper() == "SSS"
             next_pity = 0 if is_sss else next_count
             new_points = current_points - chest_cost + int(reward.get("points", 0))
 
             transaction_obj.set(stats_ref, {"points": new_points, "updated_at": SERVER_TIMESTAMP}, merge=True)
             transaction_obj.set(gacha_ref, {chest_type: next_pity, "updated_at": SERVER_TIMESTAMP}, merge=True)
+            transaction_obj.set(inventory_ref, {chest_type: chest_inventory, "updated_at": SERVER_TIMESTAMP}, merge=True)
 
             draw_log_ref = (
                 self.db.collection("users")
@@ -637,12 +745,13 @@ class FirestoreQuestService:
                 {
                     "chest_type": chest_type,
                     "cost": chest_cost,
-                    "reward_rank": str(reward.get("rank", "B")),
+                    "reward_rank": reward_rank,
                     "reward_points": int(reward.get("points", 0)),
                     "guaranteed": bool(guaranteed),
                     "pity_before": current_pity,
                     "pity_after": next_pity,
                     "points_after": new_points,
+                    "remaining_after": int(chest_inventory.get(reward_rank, 0)),
                     "created_at": SERVER_TIMESTAMP,
                 },
             )
@@ -653,13 +762,14 @@ class FirestoreQuestService:
                 "chest_type": chest_type,
                 "cost": chest_cost,
                 "reward": {
-                    "rank": str(reward.get("rank", "B")),
+                    "rank": reward_rank,
                     "points": int(reward.get("points", 0)),
                 },
                 "guaranteed": bool(guaranteed),
                 "pity_before": current_pity,
                 "pity_after": next_pity,
                 "points": new_points,
+                "inventory": chest_inventory,
             }
 
         return _tx(transaction)

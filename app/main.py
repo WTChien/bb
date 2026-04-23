@@ -399,6 +399,11 @@ def get_gacha_pity(user_id: str) -> dict:
     return service.get_gacha_pity(user_id)
 
 
+@app.get("/api/gacha/overview/{user_id}")
+def get_gacha_overview(user_id: str) -> dict:
+    return service.get_gacha_overview(user_id)
+
+
 @app.post("/api/gacha/draw/{user_id}")
 def draw_gacha(user_id: str, payload: GachaDrawRequest) -> dict:
     result = service.draw_gacha(user_id=user_id, chest_type=payload.chest_type)

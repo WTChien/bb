@@ -40,6 +40,7 @@
   activeEventAdminTab: "create",
   activeMallTab: "shop",
   gachaPity: { bronze: 0, silver: 0, gold: 0, pity_limit: 10 },
+  gachaOverview: {},
   eventSchedules: [],
   importedEventQuests: [],
   wishes: [],
@@ -1298,30 +1299,76 @@ function closeGachaModal() {
   $("#gacha-modal")?.classList.add("is-hidden");
 }
 
+function getGachaChestViewData(chestKey) {
+  const base = GACHA_CHESTS[chestKey];
+  if (!base) return null;
+  const overviewChest = state.gachaOverview?.[chestKey] || {};
+  const overviewPoolByRank = {};
+  (overviewChest.pool || []).forEach((item) => {
+    overviewPoolByRank[String(item.rank || "")] = item;
+  });
+  const pool = base.pool.map((item) => {
+    const ext = overviewPoolByRank[item.rank] || {};
+    return {
+      ...item,
+      rate: Number.isFinite(Number(ext.rate)) ? Number(ext.rate) * 100 : item.rate,
+      remaining: Number.isFinite(Number(ext.remaining)) ? Number(ext.remaining) : null,
+    };
+  });
+  return {
+    ...base,
+    cost: Number.isFinite(Number(overviewChest.cost)) ? Number(overviewChest.cost) : base.cost,
+    configuredRtp: Number(overviewChest.configured_rtp_percent || 0),
+    configuredHouseEdge: Number(overviewChest.configured_house_edge_percent || 0),
+    inventoryRtp: Number(overviewChest.inventory_rtp_percent || 0),
+    inventoryHouseEdge: Number(overviewChest.inventory_house_edge_percent || 0),
+    pool,
+  };
+}
+
 function renderGachaBoard() {
   const list = $("#gacha-list");
+  const summaryEl = $("#gacha-rtp-summary");
   if (!list) return;
   list.innerHTML = "";
 
   const pityLimit = Number(state.gachaPity?.pity_limit || 10);
-  Object.entries(GACHA_CHESTS).forEach(([key, chest]) => {
+  Object.keys(GACHA_CHESTS).forEach((key) => {
+    const chest = getGachaChestViewData(key);
+    if (!chest) return;
     const pity = Number(state.gachaPity?.[key] || 0);
     const remain = Math.max(0, pityLimit - pity);
+    const chestImg = key === "gold" ? "🪙" : key === "silver" ? "🧊" : "📦";
     const card = document.createElement("article");
-    card.className = "gacha-card";
+    card.className = `gacha-card gacha-${key}`;
+    card.setAttribute("data-gacha-card", key);
     card.innerHTML = `
+      <div class="gacha-card-visual">${chestImg}</div>
       <div class="gacha-card-head">
         <strong>${chest.icon} ${chest.label}</strong>
         <span class="pill">${chest.cost} 點</span>
       </div>
       <div class="muted">保底進度：${pity}/${pityLimit}（剩餘 ${remain} 抽）</div>
+      <div class="muted">目前庫存池估算：回收率 ${chest.inventoryRtp.toFixed(2)}%（玩家平均淨損 ${chest.inventoryHouseEdge.toFixed(2)}%）</div>
       <div class="review-actions">
         <button class="btn-wood btn-sm" type="button" data-gacha-prob="${key}">查看機率</button>
-        <button class="btn-wood btn-sm btn-accent" type="button" data-gacha-draw="${key}">點擊抽獎</button>
+        <button class="btn-wood btn-sm btn-accent" type="button" data-gacha-draw="${key}">開箱抽獎</button>
       </div>
     `;
     list.appendChild(card);
   });
+
+  if (summaryEl) {
+    const values = Object.keys(GACHA_CHESTS)
+      .map((k) => getGachaChestViewData(k))
+      .filter(Boolean);
+    if (!values.length) {
+      summaryEl.textContent = "";
+      return;
+    }
+    const avgHouseEdge = values.reduce((sum, x) => sum + Number(x.inventoryHouseEdge || 0), 0) / values.length;
+    summaryEl.textContent = `目前三種寶箱平均淨損約 ${avgHouseEdge.toFixed(2)}%。若目標是抽滿平均輸 10%，需要再調整機率或獎項點數。`;
+  }
 }
 
 async function onGachaListClick(event) {
@@ -1330,43 +1377,64 @@ async function onGachaListClick(event) {
   if (!probType && !drawType) return;
 
   if (probType) {
-    const chest = GACHA_CHESTS[probType];
+    const chest = getGachaChestViewData(probType);
     if (!chest) return;
     const rows = chest.pool
-      .map((item) => `<tr><td>${item.rank}</td><td>${item.points}</td><td>${item.rate}%</td></tr>`)
+      .map((item) => {
+        const rem = item.remaining == null ? "--" : item.remaining;
+        return `<tr><td>${item.rank}</td><td>${item.points}</td><td>${item.rate}%</td><td>${rem}</td></tr>`;
+      })
       .join("");
     openGachaModal(
       `${chest.label} 機率表`,
-      `<table class="gacha-prob-table"><thead><tr><th>等級</th><th>點數</th><th>機率</th></tr></thead><tbody>${rows}</tbody></table>`
+      `<div class="muted" style="margin-bottom:8px">理論回收率 ${chest.configuredRtp.toFixed(2)}% ｜ 理論淨損 ${chest.configuredHouseEdge.toFixed(2)}%</div>
+       <table class="gacha-prob-table"><thead><tr><th>等級</th><th>點數</th><th>機率</th><th>剩餘數量</th></tr></thead><tbody>${rows}</tbody></table>`
     );
     return;
   }
 
   if (drawType) {
     const btn = event.target.closest("button") || event.target;
+    const card = event.target.closest("[data-gacha-card]");
     btnLoading(btn);
+    card?.classList.add("is-opening");
     try {
+      openGachaModal("寶箱開啟中...", `<div class="gacha-opening"><div class="gacha-opening-stars"></div><div class="gacha-opening-text">${getGachaChestViewData(drawType)?.label || "寶箱"} 正在解鎖中</div></div>`);
       const result = await api(`/api/gacha/draw/${encodeURIComponent(state.userId)}`, {
         method: "POST",
         body: JSON.stringify({ chest_type: drawType }),
       });
+      await new Promise((resolve) => setTimeout(resolve, 700));
       state.progress.points = Number(result.points || state.progress.points || 0);
       state.gachaPity = {
         ...state.gachaPity,
         [drawType]: Number(result.pity_after || 0),
       };
+      if (result.inventory && state.gachaOverview?.[drawType]) {
+        const updatedPool = (state.gachaOverview[drawType].pool || []).map((item) => ({
+          ...item,
+          remaining: Number(result.inventory[String(item.rank || "")] ?? item.remaining ?? 0),
+        }));
+        state.gachaOverview[drawType] = {
+          ...state.gachaOverview[drawType],
+          pool: updatedPool,
+          inventory_rtp_percent: state.gachaOverview[drawType].inventory_rtp_percent,
+        };
+      }
       renderStats();
       renderGachaBoard();
       const reward = result.reward || { rank: "B", points: 0 };
       const guaranteedHtml = result.guaranteed ? '<div class="gacha-result-guaranteed">保底觸發！</div>' : "";
       openGachaModal(
         `${GACHA_CHESTS[drawType]?.label || "寶箱"} 抽獎結果`,
-        `<div class="gacha-result-wrap"><div class="gacha-result-rank">${reward.rank}</div><div class="gacha-result-points">獲得 ${reward.points} 點</div>${guaranteedHtml}<div class="muted">目前保底：${result.pity_after || 0}/${state.gachaPity.pity_limit || 10}</div></div>`
+        `<div class="gacha-result-wrap"><div class="gacha-result-rank">${reward.rank}</div><div class="gacha-result-points">獲得 ${reward.points} 點</div>${guaranteedHtml}<div class="muted">目前保底：${result.pity_after || 0}/${state.gachaPity.pity_limit || 10}</div><div class="muted">本次後該箱剩餘獎池已更新</div></div>`
       );
       setMessage(`抽獎成功！獲得 ${reward.rank}（+${reward.points} 點）`);
     } catch (err) {
+      closeGachaModal();
       setMessage(err.message, true);
     } finally {
+      card?.classList.remove("is-opening");
       btnRestore(btn);
     }
   }
@@ -1671,14 +1739,14 @@ async function refreshAll() {
     const activeJournalDate = $("#journal-date")?.value || state.dailyJournal.log_date || todayIso();
 
     const questsPath = state.role === "admin" ? "/api/quests?include_future=true" : "/api/quests";
-    const [progress, quests, rewards, announcements, giftboxMails, playerClaims, gachaPity] = await Promise.all([
+    const [progress, quests, rewards, announcements, giftboxMails, playerClaims, gachaOverview] = await Promise.all([
       api(`/api/progress/${encodeURIComponent(state.userId)}`),
       api(questsPath),
       api("/api/rewards"),
       api("/api/announcements"),
       api(`/api/giftbox/${encodeURIComponent(state.userId)}`),
       api(`/api/claims/${encodeURIComponent(state.userId)}`),
-      api(`/api/gacha/pity/${encodeURIComponent(state.userId)}`),
+      api(`/api/gacha/overview/${encodeURIComponent(state.userId)}`),
     ]);
 
     state.progress = progress;
@@ -1688,11 +1756,12 @@ async function refreshAll() {
     state.giftboxMails = giftboxMails;
     state.playerClaims = playerClaims;
     state.gachaPity = {
-      bronze: Number(gachaPity?.bronze || 0),
-      silver: Number(gachaPity?.silver || 0),
-      gold: Number(gachaPity?.gold || 0),
-      pity_limit: Number(gachaPity?.pity_limit || 10),
+      bronze: Number(gachaOverview?.pity?.bronze || 0),
+      silver: Number(gachaOverview?.pity?.silver || 0),
+      gold: Number(gachaOverview?.pity?.gold || 0),
+      pity_limit: Number(gachaOverview?.pity_limit || 10),
     };
+    state.gachaOverview = gachaOverview?.chests || {};
 
     if (state.role === "admin") {
       const [claims, submissions, templates, settings, deleted, giftHistory, eventSchedules] = await Promise.all([
