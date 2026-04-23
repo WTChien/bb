@@ -2,10 +2,16 @@ from __future__ import annotations
 
 import os
 import random
-from datetime import date, datetime
+from datetime import date, datetime, timezone, timedelta
 from pathlib import Path
 from dataclasses import dataclass
 from typing import Any
+
+TZ_TAIPEI = timezone(timedelta(hours=8))
+
+def _today_taipei() -> str:
+    """Return today's date in Asia/Taipei (UTC+8) as YYYY-MM-DD string."""
+    return datetime.now(tz=TZ_TAIPEI).date().isoformat()
 
 import firebase_admin
 from firebase_admin import credentials as fb_credentials
@@ -64,7 +70,7 @@ class FirestoreQuestService:
             .where(filter=FieldFilter("is_active", "==", True))
             .stream()
         )
-        today = date.today().isoformat()
+        today = _today_taipei()
         quests = []
         for doc in docs:
             item = doc.to_dict()
@@ -86,12 +92,12 @@ class FirestoreQuestService:
         - others: use explicit_due if given, else published_date
         """
         if category == "weekly":
-            today = date.today()
+            today = datetime.now(tz=TZ_TAIPEI).date()
             # weekday(): Monday=0, Sunday=6 → days until Sunday
             days_to_sunday = (6 - today.weekday()) % 7
             if days_to_sunday == 0:
                 days_to_sunday = 7  # if today IS Sunday, go to next Sunday
-            return (today + __import__("datetime").timedelta(days=days_to_sunday)).isoformat()
+            return (today + timedelta(days=days_to_sunday)).isoformat()
         if explicit_due:
             return explicit_due
         if category == "daily":
@@ -106,7 +112,7 @@ class FirestoreQuestService:
         elif category in ("event", "other"):
             published_date = ""
         else:
-            published_date = date.today().isoformat()
+            published_date = _today_taipei()
         due_date = self._compute_due_date(category, published_date, payload.get("due_date") or "")
         data = {
             "title": payload["title"],
@@ -139,7 +145,7 @@ class FirestoreQuestService:
         elif category in ("event", "other"):
             published_date = ""
         else:
-            published_date = date.today().isoformat()
+            published_date = _today_taipei()
         due_date = self._compute_due_date(category, published_date, payload.get("due_date") or "")
         ref.set(
             {
@@ -311,9 +317,10 @@ class FirestoreQuestService:
             "other": "其他",
         }.get(str(template.get("category", "other")), "其他")
 
-        published = date.today().isoformat()
+        published = _today_taipei()
         due_days = int(template.get("due_days", 7))
-        due = date.fromordinal(date.today().toordinal() + max(0, due_days)).isoformat()
+        today_dt = datetime.now(tz=TZ_TAIPEI).date()
+        due = (today_dt + timedelta(days=max(0, due_days))).isoformat()
 
         quest_ref = self.db.collection("quests").document()
         quest_ref.set(
