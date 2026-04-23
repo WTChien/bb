@@ -421,6 +421,10 @@ textarea{resize:vertical;min-height:64px}
   margin-top: 10px;
 }
 
+#admin-user-points-board {
+  margin-top: 6px;
+}
+
 .quest-admin-actions {
   display: flex;
   gap: 8px;
@@ -433,6 +437,40 @@ textarea{resize:vertical;min-height:64px}
   gap: 8px;
 }
 
+/* ── XLSX import / download row ── */
+.xlsx-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.xlsx-upload-label {
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+}
+
+/* ── Wish Pool ── */
+.wish-fulfilled { opacity: .65; }
+.wish-link { font-size: .88rem; color: var(--ink-soft); text-underline-offset: 3px; }
+.wish-link:hover { color: var(--accent); }
+.pill-success {
+  background: #c8f5c8;
+  color: #1b5e20;
+}
+.pill-dim {
+  background: #ececec;
+  color: #666;
+}
+.pill-visible {
+  background: #d0f0e0;
+  color: #1b5e20;
+}
+.pill-hidden {
+  background: #f5e6e6;
+  color: #8b2222;
+}
+
 .quest-select-wrap {
   display: inline-flex;
   align-items: center;
@@ -441,11 +479,34 @@ textarea{resize:vertical;min-height:64px}
   color: var(--ink-soft);
 }
 
+.journal-quest-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1.5px solid var(--panel-bd);
+  border-radius: 10px;
+  background: #fffdf5;
+}
+
+.journal-quest-row input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+}
+
 .quest-category-nav {
   display:flex;
   gap:8px;
   flex-wrap:wrap;
   margin-bottom:10px;
+}
+
+#admin-quest-nav {
+  margin-bottom: 12px;
+}
+
+#admin-quest-nav .admin-only-quest-tab.is-hidden {
+  display: none;
 }
 
 .quest-cat-tab {
@@ -829,6 +890,38 @@ textarea{resize:vertical;min-height:64px}
   opacity: .85;
 }
 
+.global-loading {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  display: grid;
+  place-items: center;
+  background: rgba(35, 27, 17, 0.35);
+  backdrop-filter: blur(1px);
+}
+
+.global-loading-panel {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  border-radius: 12px;
+  border: 2px solid var(--panel-bd);
+  background: var(--panel);
+  color: var(--ink);
+  font-weight: 800;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, .2);
+}
+
+.global-loading-spinner {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 3px solid #d8b98a;
+  border-top-color: var(--brand);
+  animation: btn-spin .65s linear infinite;
+}
+
 /* ground deco characters */
 .ground-char {
   position:absolute;bottom:0;pointer-events:none;
@@ -839,6 +932,14 @@ textarea{resize:vertical;min-height:64px}
 .gc-right { right:12px;width:130px;animation-delay:.9s; }
 
 /* responsive */
+/* Admin quest top row: 2-col grid (form + review side by side) */
+.admin-quest-top-row {
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:16px;
+  align-items:start;
+}
+
 @media (max-width:860px) {
   .layout          { grid-template-columns:1fr; }
   .hero-inner      { grid-template-columns:1fr; }
@@ -847,6 +948,7 @@ textarea{resize:vertical;min-height:64px}
   .admin-quest-top-row { grid-template-columns:1fr; }
   .quest-refresh-controls { grid-template-columns:1fr; }
   .quest-admin-actions { flex-direction:column; }
+  #admin-quest-tools + .quest-category-nav { margin-top: 12px; }
 }
 
 @media (max-width:540px) {
@@ -904,15 +1006,6 @@ textarea{resize:vertical;min-height:64px}
 .cat-quest-list:last-child {
   border-radius:0 0 12px 12px;
 }
-
-/* Admin quest top row: 2-col grid (form + review side by side) */
-.admin-quest-top-row {
-  display:grid;
-  grid-template-columns:1fr 1fr;
-  gap:16px;
-  align-items:start;
-}
-
 
 .submission-row-head {
   width:100%;

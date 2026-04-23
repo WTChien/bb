@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Love Quest ✦ 愛的任務板</title>
-    <link rel="stylesheet" href="/static/styles.css" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260424d" />
   </head>
   <body>
     <!-- sky layer -->
@@ -82,6 +82,7 @@
             <button id="nav-announce-btn" class="count-chip chip-btn" type="button">📢 公告欄</button>
             <button id="nav-quests-btn" class="count-chip chip-btn nav-active" type="button">✅ 任務</button>
             <button id="open-mall-btn" class="count-chip chip-btn" type="button">🎁 獎勵兌換</button>
+            <button id="nav-wish-btn" class="count-chip chip-btn" type="button">🌠 許願池</button>
             <button id="open-giftbox-btn" class="count-chip chip-btn giftbox-btn" type="button" aria-label="禮物盒">
               🎁 禮物盒
               <span id="giftbox-badge" class="giftbox-badge is-hidden">0</span>
@@ -126,7 +127,41 @@
 
           <!-- Quest View (default) -->
           <div id="view-quests" class="view-panel">
-            <div class="admin-quest-top-row admin-form-panel is-hidden">
+            <div id="admin-quest-nav" class="quest-category-nav">
+              <button type="button" class="quest-cat-tab" data-admin-quest-tab="list">
+                <span class="tab-icon">📋</span>
+                <span class="tab-label">任務清單</span>
+              </button>
+              <button type="button" class="quest-cat-tab" data-admin-quest-tab="journal">
+                <span class="tab-icon">📓</span>
+                <span class="tab-label">每日日誌</span>
+              </button>
+              <button type="button" class="quest-cat-tab admin-only-quest-tab" data-admin-quest-tab="create">
+                <span class="tab-icon">🛠️</span>
+                <span class="tab-label">新增任務</span>
+              </button>
+              <button type="button" class="quest-cat-tab admin-only-quest-tab" data-admin-quest-tab="review">
+                <span class="tab-icon">✅</span>
+                <span class="tab-label">任務審核</span>
+              </button>
+              <button type="button" class="quest-cat-tab admin-only-quest-tab" data-admin-quest-tab="database">
+                <span class="tab-icon">🗂️</span>
+                <span class="tab-label">任務資料庫</span>
+              </button>
+              <button type="button" class="quest-cat-tab admin-only-quest-tab" data-admin-quest-tab="event-schedule">
+                <span class="tab-icon">🎉</span>
+                <span class="tab-label">活動排程</span>
+              </button>
+              <button type="button" class="quest-cat-tab admin-only-quest-tab" data-admin-quest-tab="deleted">
+                <span class="tab-icon">🗑️</span>
+                <span class="tab-label">最近刪除</span>
+              </button>
+              <button type="button" class="quest-cat-tab admin-only-quest-tab" data-admin-quest-tab="points">
+                <span class="tab-icon">💰</span>
+                <span class="tab-label">玩家點數</span>
+              </button>
+            </div>
+            <div id="admin-quest-top-row" class="admin-quest-top-row admin-form-panel is-hidden">
             <div id="admin-quest-form-panel" class="sign-board">
               <div class="sign-header"><img src="/img/nobg_study.png?v=2" class="hd-icon" alt=""> 📋 新增任務</div>
               <form id="quest-form" class="sign-body stack">
@@ -146,14 +181,33 @@
                     <option value="hard">困難</option>
                   </select>
                 </label>
-                <label class="field-label">發布日期
-                  <input id="q-published-date" type="date" />
+                <label class="field-label">任務種類
+                  <select id="q-category">
+                    <option value="daily">每日</option>
+                    <option value="weekly">每週</option>
+                    <option value="event">活動</option>
+                    <option value="other">其他</option>
+                  </select>
                 </label>
-                <label class="field-label">任務截止日期
-                  <input id="q-due-date" type="date" />
-                </label>
+                <div id="q-date-fields" class="stack is-hidden">
+                  <label class="field-label">發布日期
+                    <input id="q-published-date" type="date" />
+                  </label>
+                  <label class="field-label">任務截止日期
+                    <input id="q-due-date" type="date" />
+                  </label>
+                </div>
                 <button id="quest-submit-btn" class="btn-wood btn-brand" type="submit">＋ 建立任務</button>
               </form>
+              <div class="sign-body stack">
+                <div class="sign-subtitle">📥 批次匯入任務（xlsx）</div>
+                <div class="xlsx-actions">
+                  <a href="/api/template/quests-events.xlsx" download class="btn-wood btn-sm">⬇ 下載範本 xlsx</a>
+                  <label class="btn-wood btn-sm btn-accent xlsx-upload-label" for="quest-xlsx-upload">📥 匯入任務 xlsx</label>
+                  <input id="quest-xlsx-upload" type="file" accept=".xlsx" class="is-hidden" />
+                  <span id="quest-xlsx-status" class="muted"></span>
+                </div>
+              </div>
             </div>
             <div id="admin-review-board" class="sign-board">
               <div class="sign-header"><img src="/img/nobg_shisho.png?v=2" class="hd-icon" alt=""> ✅ 任務審核（待審 <span id="submission-pending-count">0</span>）</div>
@@ -162,7 +216,7 @@
               </div>
             </div>
             </div><!-- end admin-quest-top-row -->
-            <div class="sign-board">
+            <div id="quest-list-board" class="sign-board">
               <div class="sign-header"><img src="/img/nobg_shisho.png?v=2" class="hd-icon" alt=""> ⚔️ 任務清單</div>
               <div class="sign-body">
                 <div id="admin-quest-tools" class="admin-form-panel is-hidden stack">
@@ -180,6 +234,7 @@
                     <button id="save-refresh-settings-btn" class="btn-wood btn-sm" type="button">儲存刷新設定</button>
                     <button id="refresh-from-db-btn" class="btn-wood btn-sm btn-accent" type="button">依設定刷新任務</button>
                   </div>
+                  <p class="muted" style="font-size:.8rem;margin:4px 0 0">⚠ 儲存刷新設定僅儲存每日/每週的<strong>顯示數量</strong>，不影響其他設定</p>
                 </div>
                 <div id="quest-category-nav" class="quest-category-nav"></div>
                 <div class="quest-toolbar">
@@ -206,6 +261,25 @@
                   </label>
                 </div>
                 <div id="quest-list" class="list"></div>
+                <div id="daily-journal-board" class="sign-board">
+                  <div class="sign-header"><img src="/img/nobg_chii.png?v=2" class="hd-icon" alt=""> 📓 每日日誌</div>
+                  <div class="sign-body stack">
+                    <form id="daily-journal-form" class="stack">
+                      <label class="field-label">日期
+                        <input id="journal-date" type="date" required />
+                      </label>
+                      <label class="field-label">今天去了哪裡
+                        <input id="journal-visited-place" maxlength="200" placeholder="例如：中山公園、咖啡店、學校" />
+                      </label>
+                      <label class="field-label">今日紀錄
+                        <textarea id="journal-note" maxlength="400" placeholder="今天發生了什麼，想記下來的事"></textarea>
+                      </label>
+                      <div class="field-label">今天完成的任務</div>
+                      <div id="journal-completed-quests" class="list"></div>
+                      <button id="save-journal-btn" class="btn-wood btn-sm btn-accent" type="submit">儲存今日日誌</button>
+                    </form>
+                  </div>
+                </div>
                 <div id="admin-template-board" class="admin-form-panel is-hidden stack">
                   <div class="sign-subtitle">任務資料庫</div>
                   <form id="template-form" class="stack">
@@ -235,6 +309,19 @@
                     </label>
                     <label class="field-label">預設截止天數
                       <input id="t-due-days" type="number" min="0" max="365" value="7" />
+                                        <label class="field-label">任務分類
+                                          <select id="t-category">
+                                            <option value="daily">每日</option>
+                                            <option value="weekly">每週</option>
+                                            <option value="event">活動</option>
+                                            <option value="other">其他</option>
+                                          </select>
+                                        </label>
+                                        <div id="t-due-days-field" class="is-hidden">
+                                          <label class="field-label">預設截止天數
+                                            <input id="t-due-days" type="number" min="0" max="365" value="7" />
+                                          </label>
+                                        </div>
                     </label>
                     <button class="btn-wood btn-accent" type="submit">新增到任務資料庫</button>
                   </form>
@@ -245,14 +332,102 @@
                 </div>
                 <div id="admin-deleted-quests-board" class="admin-form-panel is-hidden stack">
                   <div class="sign-subtitle">最近刪除</div>
+                  <div class="quest-admin-actions" style="margin-bottom:8px">
+                    <button id="restore-selected-deleted-btn" class="btn-wood btn-sm btn-accent" type="button">回復所選</button>
+                    <button id="delete-selected-deleted-btn" class="btn-wood btn-sm btn-brand" type="button">刪除所選</button>
+                    <button id="delete-all-deleted-btn" class="btn-wood btn-sm btn-brand" type="button">刪除全部</button>
+                  </div>
                   <div id="deleted-quest-list" class="list"></div>
                 </div>
+                <div id="admin-user-points-board" class="admin-form-panel is-hidden stack">
+                  <div class="sign-subtitle">玩家點數總覽</div>
+                  <div id="admin-user-points-list" class="list"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Event Schedule Board (admin only) -->
+          <div id="admin-event-schedule-board" class="admin-form-panel is-hidden stack">
+            <div id="event-admin-nav" class="quest-category-nav">
+              <button type="button" class="quest-cat-tab" data-event-admin-tab="create">
+                <span class="tab-icon">🛠️</span>
+                <span class="tab-label">新增活動排程</span>
+              </button>
+              <button type="button" class="quest-cat-tab" data-event-admin-tab="preview">
+                <span class="tab-icon">🧪</span>
+                <span class="tab-label">活動發布預覽</span>
+              </button>
+              <button type="button" class="quest-cat-tab" data-event-admin-tab="list">
+                <span class="tab-icon">📅</span>
+                <span class="tab-label">活動排程列表</span>
+              </button>
+            </div>
+            <div id="event-create-board" class="sign-board">
+              <div class="sign-header"><img src="/img/nobg_lion.png?v=2" class="hd-icon" alt=""> 🎉 新增活動排程</div>
+              <form id="event-schedule-form" class="sign-body stack">
+                <label class="field-label">活動名稱
+                  <input id="ev-title" required maxlength="80" placeholder="例：五月甜蜜特別活動" />
+                </label>
+                <label class="field-label">活動說明
+                  <textarea id="ev-description" maxlength="400" placeholder="活動說明文字（選填）"></textarea>
+                </label>
+                <div class="quest-toolbar">
+                  <label class="field-label">開始日期
+                    <input id="ev-start-date" type="date" required />
+                  </label>
+                  <label class="field-label">結束日期
+                    <input id="ev-end-date" type="date" required />
+                  </label>
+                  <label class="field-label">點數倍率
+                    <input id="ev-multiplier" type="number" min="0.5" max="10" step="0.5" value="1" required />
+                    <span class="muted" style="font-size:.78rem">1 = 正常，2 = 雙倍</span>
+                  </label>
+                </div>
+                <div class="sign-subtitle">📢 活動公告（發布後自動推播）</div>
+                <label class="field-label">公告標題
+                  <input id="ev-ann-title" maxlength="80" placeholder="例：🎉 五月活動開跑！" />
+                </label>
+                <label class="field-label">公告內容
+                  <textarea id="ev-ann-content" maxlength="400" placeholder="告知玩家活動內容、期間與特別規則"></textarea>
+                </label>
+                <label class="field-label">活動時間說明（留空自動填入日期區間）
+                  <input id="ev-ann-time" maxlength="80" placeholder="例：2026/05/01 - 2026/05/31" />
+                </label>
+                <label class="field-label" style="flex-direction:row;align-items:center;gap:8px">
+                  <input id="ev-auto-announce" type="checkbox" checked style="width:16px;height:16px" />
+                  <span>發布活動時自動推播公告給玩家</span>
+                </label>
+                <div class="sign-subtitle">📦 從 xlsx 匯入活動任務（不會自動發布活動）</div>
+                <div class="xlsx-actions">
+                  <a href="/api/template/event-quests.xlsx" download class="btn-wood btn-sm">⬇ 下載活動任務範本 xlsx</a>
+                  <label class="btn-wood btn-sm btn-accent xlsx-upload-label" for="event-xlsx-upload">📥 匯入活動 xlsx</label>
+                  <input id="event-xlsx-upload" type="file" accept=".xlsx" class="is-hidden" />
+                  <span id="event-xlsx-status" class="muted"></span>
+                </div>
+                <button id="event-schedule-submit-btn" class="btn-wood btn-brand" type="submit">🎉 發布活動</button>
+              </form>
+            </div>
+            <div id="event-preview-board" class="sign-board is-hidden">
+              <div class="sign-header"><img src="/img/nobg_shisho.png?v=2" class="hd-icon" alt=""> 🧪 活動發布預覽（未發布 <span id="event-import-preview-count">0</span> 筆）</div>
+              <div class="sign-body stack">
+                <div id="event-import-preview-board" class="stack">
+                  <p class="muted" style="margin:0">以下為本次匯入任務，可先編輯/刪除；確認後再切回「新增活動排程」按下發布活動。</p>
+                  <div id="event-import-preview-list" class="list"></div>
+                </div>
+              </div>
+            </div>
+            <div id="event-list-board" class="sign-board is-hidden">
+              <div class="sign-header"><img src="/img/nobg_shisho.png?v=2" class="hd-icon" alt=""> 📅 活動排程列表</div>
+              <div class="sign-body">
+                <div id="event-schedule-list" class="list"></div>
               </div>
             </div>
           </div>
 
           <!-- Mall View -->
           <div id="view-mall" class="view-panel is-hidden">
+            <div id="mall-nav" class="quest-category-nav"></div>
             <div id="admin-reward-form-panel" class="sign-board admin-form-panel is-hidden">
               <div class="sign-header"><img src="/img/nobg_lion.png?v=2" class="hd-icon" alt=""> 🎁 新增獎勵</div>
               <form id="reward-form" class="sign-body stack">
@@ -265,10 +440,7 @@
                 <label class="field-label">兌換點數
                   <input id="r-cost" type="number" min="1" max="9999" required />
                 </label>
-                <label class="field-label">圖片路徑
-                  <input id="r-image" maxlength="120" placeholder="/img/chii_sleep.png" />
-                </label>
-                <label class="field-label">或上傳圖片
+                <label class="field-label">上傳圖片（選填）
                   <input id="r-image-file" type="file" accept="image/*" />
                 </label>
                 <button class="btn-wood btn-accent" type="submit">＋ 建立獎勵</button>
@@ -292,7 +464,6 @@
                 <button class="btn-wood btn-accent" type="submit">📮 發送信件</button>
               </form>
             </div>
-            <div id="mall-nav" class="quest-category-nav"></div>
             <div id="mall-reward-board" class="sign-board">
               <div class="sign-header"><img src="/img/nobg_3_nice.png?v=2" class="hd-icon" alt=""> 🌟 獎勵商城</div>
               <div class="sign-body">
@@ -315,6 +486,35 @@
               <div class="sign-header"><img src="/img/nobg_ha_cheer.png?v=2" class="hd-icon" alt=""> 🧾 送禮歷史</div>
               <div class="sign-body">
                 <div id="gift-history-list" class="list"></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Wish Pool View -->
+          <div id="view-wish" class="view-panel is-hidden">
+            <div class="sign-board">
+              <div class="sign-header"><img src="/img/nobg_3_nice.png?v=2" class="hd-icon" alt=""> 🌠 許願池</div>
+              <div class="sign-body stack">
+                <p class="muted">把你想要的東西連結丟進來，讓我知道可以送你什麼禮物 ✨</p>
+                <form id="wish-form" class="stack">
+                  <label class="field-label">商品連結 *
+                    <input id="w-url" type="url" required maxlength="1000" placeholder="https://..." />
+                  </label>
+                  <label class="field-label">商品名稱（選填）
+                    <input id="w-item-name" maxlength="120" placeholder="例：吉伊卡哇抱枕" />
+                  </label>
+                  <label class="field-label">備註（選填）
+                    <textarea id="w-note" maxlength="300" placeholder="顏色、尺寸、特別說明..." rows="2"></textarea>
+                  </label>
+                  <button class="btn-wood btn-accent" type="submit">🌠 投入許願池</button>
+                </form>
+              </div>
+            </div>
+            <div id="wish-board" class="sign-board">
+              <div class="sign-header"><img src="/img/nobg_chii.png?v=2" class="hd-icon" alt=""> 🌠 我的願望清單</div>
+              <div class="sign-header admin-only is-hidden"><img src="/img/nobg_lion.png?v=2" class="hd-icon" alt=""> 🌠 所有願望清單（管理員）</div>
+              <div class="sign-body">
+                <div id="wish-list" class="list"></div>
               </div>
             </div>
           </div>
@@ -365,6 +565,13 @@
 
     </div>
 
-    <script src="/static/app.js"></script>
+    <div id="global-loading" class="global-loading is-hidden" aria-live="polite" aria-busy="true">
+      <div class="global-loading-panel">
+        <span class="global-loading-spinner" aria-hidden="true"></span>
+        <span id="global-loading-text">資料載入中，請稍後...</span>
+      </div>
+    </div>
+
+    <script src="/static/app.js?v=20260424h"></script>
   </body>
 </html>

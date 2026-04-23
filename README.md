@@ -75,7 +75,7 @@ $env:GOOGLE_CLOUD_PROJECT="your-project-id"
 3. 啟動伺服器
 
 ```bash
-uvicorn app.main:app --reload
+uvicorn app.main:app --reload --lifespan off
 ```
 
 或使用：

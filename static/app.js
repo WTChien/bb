@@ -18,19 +18,34 @@
   submissions: [],
   giftboxMails: [],
   giftboxHistory: [],
+  userPointsSummary: [],
   announcements: [],
   questTemplates: [],
   deletedQuests: [],
-  refreshSettings: { daily_count: 3, weekly_count: 2 },
+  selectedDeletedIds: {},
+  refreshSettings: { daily_count: 5, weekly_count: 10 },
+  dailyJournal: {
+    log_date: "",
+    visited_place: "",
+    note: "",
+    completed_quest_ids: [],
+  },
+  completedQuestsByDate: [],
   selectedQuestIds: {},
   questSortBy: "published_date",
   questSortOrder: "desc",
   questFilterDifficulty: "all",
   activeQuestCategory: "all",
+  activeAdminQuestTab: "list",
+  activeEventAdminTab: "create",
   activeMallTab: "shop",
+  eventSchedules: [],
+  importedEventQuests: [],
+  wishes: [],
   collapsedQuestIds: {},
   expandedSubmissionIds: {},
   editingQuestId: null,
+  editingRewardId: null,
 };
 
 const USER_PASSPHRASE = "咕咕嘎嘎";
@@ -38,8 +53,16 @@ const ADMIN_PASSPHRASE = "tim0403";
 const SESSION_KEY = "love_quest_admin_session";
 const DEFAULT_USER_ID = "郭芸甄";
 const DEFAULT_ADMIN_ID = "admin";
+let globalLoadingCount = 0;
 
 const $ = (selector) => document.querySelector(selector);
+
+function todayIso() {
+  const now = new Date();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  return `${now.getFullYear()}-${month}-${day}`;
+}
 
 function api(path, options = {}) {
   return fetch(path, {
@@ -67,6 +90,22 @@ function apiForm(path, formData) {
     }
     return json;
   });
+}
+
+function showGlobalLoading(text = "資料載入中，請稍後...") {
+  const mask = $("#global-loading");
+  const textEl = $("#global-loading-text");
+  globalLoadingCount += 1;
+  if (textEl) textEl.textContent = text;
+  mask?.classList.remove("is-hidden");
+}
+
+function hideGlobalLoading() {
+  const mask = $("#global-loading");
+  globalLoadingCount = Math.max(0, globalLoadingCount - 1);
+  if (globalLoadingCount === 0) {
+    mask?.classList.add("is-hidden");
+  }
 }
 
 function setMessage(text, isError = false) {
@@ -104,9 +143,145 @@ function applyRoleUI() {
     adminClaimsBoard?.classList.add("is-hidden");
     adminReviewBoard?.classList.add("is-hidden");
     playerHistoryBoard?.classList.remove("is-hidden");
+    state.activeAdminQuestTab = "list";
   }
 
-  applyMallTabVisibility();
+  renderAdminQuestNav();
+  applyAdminQuestTabVisibility();
+  renderMallNav();
+}
+
+function renderAdminQuestNav() {
+  const nav = $("#admin-quest-nav");
+  if (!nav) return;
+
+  const tabs = nav.querySelectorAll("[data-admin-quest-tab]");
+  const adminTabs = nav.querySelectorAll(".admin-only-quest-tab");
+  adminTabs.forEach((btn) => btn.classList.toggle("is-hidden", state.role !== "admin"));
+
+  const allowedTabs = state.role === "admin"
+    ? new Set(["list", "journal", "create", "review", "database", "event-schedule", "deleted", "points"])
+    : new Set(["list", "journal"]);
+  if (!allowedTabs.has(state.activeAdminQuestTab)) {
+    state.activeAdminQuestTab = "list";
+  }
+
+  tabs.forEach((btn) => {
+    const tab = btn.getAttribute("data-admin-quest-tab");
+    btn.classList.toggle("active", state.activeAdminQuestTab === tab);
+  });
+}
+
+function applyAdminQuestTabVisibility() {
+  const nav = $("#admin-quest-nav");
+  const topRow = $("#admin-quest-top-row");
+  const formPanel = $("#admin-quest-form-panel");
+  const reviewBoard = $("#admin-review-board");
+  const listBoard = $("#quest-list-board");
+  const listHeader = listBoard?.querySelector(":scope > .sign-header");
+  const adminTools = $("#admin-quest-tools");
+  const categoryNav = $("#quest-category-nav");
+  const toolbar = listBoard?.querySelector(":scope .quest-toolbar");
+  const questList = $("#quest-list");
+  const dailyJournalBoard = $("#daily-journal-board");
+  const templateBoard = $("#admin-template-board");
+  const deletedBoard = $("#admin-deleted-quests-board");
+  const pointsBoard = $("#admin-user-points-board");
+  const eventScheduleBoard = $("#admin-event-schedule-board");
+  if (!nav || !topRow || !formPanel || !reviewBoard || !listBoard) return;
+
+  // Always hide event schedule board by default; only show for its tab
+  eventScheduleBoard?.classList.add("is-hidden");
+
+  const setListMode = (mode) => {
+    const isListMode = mode === "list";
+    const isJournalMode = mode === "journal";
+    const isDatabaseMode = mode === "database";
+    const isDeletedMode = mode === "deleted";
+    const isPointsMode = mode === "points";
+    if (listHeader) listHeader.classList.toggle("is-hidden", !isListMode && !isDatabaseMode);
+    adminTools?.classList.toggle("is-hidden", !isListMode || state.role !== "admin");
+    categoryNav?.classList.toggle("is-hidden", !isListMode && !isDatabaseMode);
+    toolbar?.classList.toggle("is-hidden", !isListMode && !isDatabaseMode);
+    questList?.classList.toggle("is-hidden", !isListMode && !isDatabaseMode);
+    dailyJournalBoard?.classList.toggle("is-hidden", !isJournalMode);
+    templateBoard?.classList.toggle("is-hidden", !isDatabaseMode);
+    deletedBoard?.classList.toggle("is-hidden", !isDeletedMode);
+    pointsBoard?.classList.toggle("is-hidden", !isPointsMode);
+  };
+
+  if (state.role !== "admin") {
+    nav.classList.remove("is-hidden");
+    topRow.classList.add("is-hidden");
+    listBoard.classList.remove("is-hidden");
+    setListMode(state.activeAdminQuestTab === "journal" ? "journal" : "list");
+    return;
+  }
+
+  nav.classList.remove("is-hidden");
+
+  if (state.activeAdminQuestTab === "create") {
+    topRow.classList.remove("is-hidden");
+    formPanel.classList.remove("is-hidden");
+    reviewBoard.classList.add("is-hidden");
+    listBoard.classList.add("is-hidden");
+    setListMode("list");
+    return;
+  }
+
+  if (state.activeAdminQuestTab === "review") {
+    topRow.classList.remove("is-hidden");
+    formPanel.classList.add("is-hidden");
+    reviewBoard.classList.remove("is-hidden");
+    listBoard.classList.add("is-hidden");
+    setListMode("list");
+    return;
+  }
+
+  if (state.activeAdminQuestTab === "database") {
+    topRow.classList.add("is-hidden");
+    listBoard.classList.remove("is-hidden");
+    setListMode("database");
+    return;
+  }
+
+  if (state.activeAdminQuestTab === "journal") {
+    topRow.classList.add("is-hidden");
+    listBoard.classList.remove("is-hidden");
+    setListMode("journal");
+    return;
+  }
+
+  if (state.activeAdminQuestTab === "event-schedule") {
+    topRow.classList.add("is-hidden");
+    listBoard.classList.add("is-hidden");
+    eventScheduleBoard?.classList.remove("is-hidden");
+    renderEventAdminNav();
+    applyEventAdminTabVisibility();
+    return;
+  }
+
+  if (state.activeAdminQuestTab === "deleted") {
+    topRow.classList.add("is-hidden");
+    listBoard.classList.remove("is-hidden");
+    setListMode("deleted");
+    renderDeletedQuests();
+    return;
+  }
+
+  if (state.activeAdminQuestTab === "points") {
+    topRow.classList.add("is-hidden");
+    listBoard.classList.remove("is-hidden");
+    setListMode("points");
+    renderAdminUserPoints();
+    return;
+  }
+
+  topRow.classList.add("is-hidden");
+  formPanel.classList.remove("is-hidden");
+  reviewBoard.classList.remove("is-hidden");
+  listBoard.classList.remove("is-hidden");
+  setListMode("list");
 }
 
 function unlockAdmin(user, role) {
@@ -170,6 +345,7 @@ function onLogout() {
   localStorage.removeItem(SESSION_KEY);
   state.role = "user";
   state.adminUser = "";
+  state.activeAdminQuestTab = "list";
   state.submissions = [];
   state.claims = [];
   state.playerClaims = [];
@@ -177,9 +353,12 @@ function onLogout() {
   state.giftboxHistory = [];
   state.questTemplates = [];
   state.deletedQuests = [];
+  state.selectedDeletedIds = {};
   state.selectedQuestIds = {};
+  state.importedEventQuests = [];
   state.expandedSubmissionIds = {};
   state.editingQuestId = null;
+  state.editingRewardId = null;
   $("#app-shell").classList.add("is-hidden");
   $("#auth-gate").classList.remove("is-hidden");
   $("#login-form").reset();
@@ -191,12 +370,14 @@ function showView(view) {
   const announceView = $("#view-announce");
   const questsView = $("#view-quests");
   const mallView = $("#view-mall");
+  const wishView = $("#view-wish");
   const navAnnounceBtn = $("#nav-announce-btn");
   const navQuestsBtn = $("#nav-quests-btn");
   const mallBtn = $("#open-mall-btn");
+  const navWishBtn = $("#nav-wish-btn");
 
-  [announceView, questsView, mallView].forEach((v) => v?.classList.add("is-hidden"));
-  [navAnnounceBtn, navQuestsBtn, mallBtn].forEach((b) => b?.classList.remove("nav-active"));
+  [announceView, questsView, mallView, wishView].forEach((v) => v?.classList.add("is-hidden"));
+  [navAnnounceBtn, navQuestsBtn, mallBtn, navWishBtn].forEach((b) => b?.classList.remove("nav-active"));
 
   if (view === "announce") {
     announceView?.classList.remove("is-hidden");
@@ -204,6 +385,16 @@ function showView(view) {
   } else if (view === "mall") {
     mallView?.classList.remove("is-hidden");
     mallBtn?.classList.add("nav-active");
+  } else if (view === "wish") {
+    wishView?.classList.remove("is-hidden");
+    navWishBtn?.classList.add("nav-active");
+    // update board header visibility based on role
+    wishView?.querySelectorAll(".admin-only").forEach((el) =>
+      el.classList.toggle("is-hidden", state.role !== "admin")
+    );
+    wishView?.querySelectorAll(".user-only").forEach((el) =>
+      el.classList.toggle("is-hidden", state.role === "admin")
+    );
   } else {
     questsView?.classList.remove("is-hidden");
     navQuestsBtn?.classList.add("nav-active");
@@ -219,23 +410,36 @@ function closeRewardMall() {
 }
 
 function applyMallTabVisibility() {
+  const rewardFormPanel = $("#admin-reward-form-panel");
+  const giftDispatchPanel = $("#admin-gift-dispatch-panel");
   const rewardBoard = $("#mall-reward-board");
+  const adminClaimsBoard = $("#admin-claims-board");
+  const adminGiftHistoryBoard = $("#admin-gift-history-board");
   const historyBoard = $("#player-claim-history-board");
   const isAdmin = state.role === "admin";
 
-  if (isAdmin) {
-    rewardBoard?.classList.remove("is-hidden");
-    historyBoard?.classList.add("is-hidden");
+  if (!isAdmin) {
+    const showHistory = state.activeMallTab === "history";
+    rewardFormPanel?.classList.add("is-hidden");
+    giftDispatchPanel?.classList.add("is-hidden");
+    adminClaimsBoard?.classList.add("is-hidden");
+    adminGiftHistoryBoard?.classList.add("is-hidden");
+    rewardBoard?.classList.toggle("is-hidden", showHistory);
+    historyBoard?.classList.toggle("is-hidden", !showHistory);
     return;
   }
 
-  if (state.activeMallTab === "history") {
-    rewardBoard?.classList.add("is-hidden");
-    historyBoard?.classList.remove("is-hidden");
-  } else {
-    rewardBoard?.classList.remove("is-hidden");
-    historyBoard?.classList.add("is-hidden");
+  const validAdminTabs = new Set(["shop", "create", "dispatch", "claims", "gift-history"]);
+  if (!validAdminTabs.has(state.activeMallTab)) {
+    state.activeMallTab = "shop";
   }
+
+  rewardFormPanel?.classList.toggle("is-hidden", state.activeMallTab !== "create");
+  giftDispatchPanel?.classList.toggle("is-hidden", state.activeMallTab !== "dispatch");
+  rewardBoard?.classList.toggle("is-hidden", state.activeMallTab !== "shop");
+  adminClaimsBoard?.classList.toggle("is-hidden", state.activeMallTab !== "claims");
+  adminGiftHistoryBoard?.classList.toggle("is-hidden", state.activeMallTab !== "gift-history");
+  historyBoard?.classList.add("is-hidden");
 }
 
 function renderMallNav() {
@@ -243,12 +447,22 @@ function renderMallNav() {
   if (!nav) return;
 
   nav.innerHTML = "";
-  const tabs = [
-    { key: "shop", label: "獎勵商城", icon: "🎁", count: state.rewards.length },
-    { key: "history", label: "兌換歷史", icon: "🧾", count: state.playerClaims.length },
-  ].filter((tab) => (state.role === "admin" ? tab.key === "shop" : true));
+  const isAdmin = state.role === "admin";
+  const tabs = isAdmin
+    ? [
+        { key: "shop", label: "獎勵商城", icon: "🎁", count: state.rewards.length },
+        { key: "create", label: "新增獎勵", icon: "🛠️" },
+        { key: "dispatch", label: "派發點數", icon: "💰" },
+        { key: "claims", label: "兌換管理", icon: "📦", count: state.claims.length },
+        { key: "gift-history", label: "送禮歷史", icon: "🧾", count: state.giftboxHistory.length },
+      ]
+    : [
+        { key: "shop", label: "獎勵商城", icon: "🎁", count: state.rewards.length },
+        { key: "history", label: "兌換歷史", icon: "🧾", count: state.playerClaims.length },
+      ];
 
-  if (state.role === "admin") {
+  const validTabKeys = new Set(tabs.map((tab) => tab.key));
+  if (!validTabKeys.has(state.activeMallTab)) {
     state.activeMallTab = "shop";
   }
 
@@ -257,10 +471,13 @@ function renderMallNav() {
     btn.type = "button";
     btn.className = `quest-cat-tab${state.activeMallTab === tab.key ? " active" : ""}`;
     btn.setAttribute("data-mall-tab", tab.key);
+    const badgeHtml = Number.isFinite(tab.count)
+      ? `<span class="tab-remain">${tab.count}</span>`
+      : "";
     btn.innerHTML = `
       <span class="tab-icon">${tab.icon}</span>
       <span class="tab-label">${tab.label}</span>
-      <span class="tab-remain">${tab.count}</span>
+      ${badgeHtml}
     `;
     nav.appendChild(btn);
   });
@@ -401,17 +618,135 @@ function renderDeletedQuests() {
     return;
   }
   state.deletedQuests.forEach((q) => {
+    const isChecked = !!state.selectedDeletedIds[q.id];
     const item = document.createElement("article");
     item.className = "item";
     item.innerHTML = `
       <div class="item-head">
+        <label class="quest-select-wrap"><input type="checkbox" data-select-deleted="${q.id}" ${isChecked ? "checked" : ""}> 勾選</label>
         <strong>${q.title || "未命名任務"}</strong>
         <span class="pill">${q.reason || "manual"}</span>
       </div>
       <div class="muted">點數：${q.points || 0} ｜ 難度：${difficultyLabel(q.difficulty)}</div>
+      <div class="review-actions">
+        <button class="btn-wood btn-sm btn-accent" data-restore-deleted="${q.id}" type="button">回復</button>
+        <button class="btn-wood btn-sm btn-brand" data-perm-delete-deleted="${q.id}" type="button">永久刪除</button>
+      </div>
     `;
     list.appendChild(item);
   });
+}
+
+function renderAdminUserPoints() {
+  const list = $("#admin-user-points-list");
+  if (!list) return;
+  list.innerHTML = "";
+
+  if (state.role !== "admin") {
+    return;
+  }
+
+  if (!state.userPointsSummary.length) {
+    list.innerHTML = '<div class="muted">目前沒有可顯示的玩家資料。</div>';
+    return;
+  }
+
+  state.userPointsSummary.forEach((row) => {
+    const item = document.createElement("article");
+    item.className = "item";
+    item.innerHTML = `
+      <div class="item-head">
+        <strong>${row.user_id}</strong>
+        <span class="pill">${row.points} 點</span>
+      </div>
+      <div class="muted">完成任務：${row.completed_count || 0} ｜ 已兌換：${row.claimed_count || 0}</div>
+    `;
+    list.appendChild(item);
+  });
+}
+
+function renderDailyJournal() {
+  const dateInput = $("#journal-date");
+  const placeInput = $("#journal-visited-place");
+  const noteInput = $("#journal-note");
+  const completedList = $("#journal-completed-quests");
+  if (!dateInput || !placeInput || !noteInput || !completedList) return;
+
+  const logDate = state.dailyJournal.log_date || dateInput.value || todayIso();
+  dateInput.value = logDate;
+  placeInput.value = state.dailyJournal.visited_place || "";
+  noteInput.value = state.dailyJournal.note || "";
+
+  const selectedIds = new Set(state.dailyJournal.completed_quest_ids || []);
+  completedList.innerHTML = "";
+
+  if (!state.completedQuestsByDate.length) {
+    completedList.innerHTML = '<div class="muted">這一天目前沒有已完成任務。</div>';
+    return;
+  }
+
+  state.completedQuestsByDate.forEach((quest) => {
+    const row = document.createElement("label");
+    row.className = "journal-quest-row";
+    row.innerHTML = `
+      <input type="checkbox" data-journal-quest-id="${quest.quest_id}" ${selectedIds.has(quest.quest_id) ? "checked" : ""} />
+      <span>${quest.title || "未命名任務"}</span>
+      <span class="pill">+${quest.points_awarded || 0} 點</span>
+    `;
+    completedList.appendChild(row);
+  });
+}
+
+async function loadDailyJournalByDate(logDate) {
+  const safeDate = logDate || todayIso();
+  const user = encodeURIComponent(state.userId || DEFAULT_USER_ID);
+  const dateParam = encodeURIComponent(safeDate);
+  const [completed, journal] = await Promise.all([
+    api(`/api/completed-quests/${user}?date=${dateParam}`),
+    api(`/api/daily-journal/${user}?date=${dateParam}`),
+  ]);
+  state.completedQuestsByDate = Array.isArray(completed) ? completed : [];
+  state.dailyJournal = {
+    log_date: journal.log_date || safeDate,
+    visited_place: journal.visited_place || "",
+    note: journal.note || "",
+    completed_quest_ids: journal.completed_quest_ids || [],
+  };
+  renderDailyJournal();
+}
+
+async function saveDailyJournal(event) {
+  event.preventDefault();
+  const btn = event.target.querySelector('button[type="submit"]');
+  btnLoading(btn);
+  try {
+    const logDate = $("#journal-date")?.value || todayIso();
+    const selectedIds = Array.from(document.querySelectorAll('[data-journal-quest-id]:checked')).map(
+      (el) => el.getAttribute("data-journal-quest-id")
+    ).filter(Boolean);
+
+    const payload = {
+      log_date: logDate,
+      visited_place: $("#journal-visited-place")?.value.trim() || "",
+      note: $("#journal-note")?.value.trim() || "",
+      completed_quest_ids: selectedIds,
+    };
+    const result = await api(`/api/daily-journal/${encodeURIComponent(state.userId)}`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+    state.dailyJournal = {
+      log_date: result.log_date || logDate,
+      visited_place: result.visited_place || payload.visited_place,
+      note: result.note || payload.note,
+      completed_quest_ids: result.completed_quest_ids || selectedIds,
+    };
+    renderDailyJournal();
+    setMessage(result.message || "每日日誌已儲存");
+  } catch (err) {
+    btnRestore(btn);
+    setMessage(err.message, true);
+  }
 }
 
 function getFilteredTemplates() {
@@ -475,6 +810,7 @@ const CATEGORY_CONFIG = {
 const CATEGORY_ORDER = ["event", "daily", "weekly", "other"];
 
 function getQuestCategory(quest) {
+  if (quest.category && quest.category !== "other") return quest.category;
   const title = quest.title || "";
   if (title.startsWith("每日")) return "daily";
   if (title.startsWith("每週") || title.startsWith("每周")) return "weekly";
@@ -526,17 +862,57 @@ function getVisibleQuests() {
 
   const difficultyOrder = { easy: 1, medium: 2, hard: 3 };
   const dir = state.questSortOrder === "asc" ? 1 : -1;
+
+  // Primary sort: sort_order desc (promoted quests come first), secondary: user-selected sort
   quests.sort((a, b) => {
+    // sort_order tiebreak first (higher = top); ignore when user sorts by something else
+    const so = (Number(b.sort_order ?? 0) - Number(a.sort_order ?? 0));
     if (state.questSortBy === "points") {
-      return (Number(a.points || 0) - Number(b.points || 0)) * dir;
+      const pts = (Number(a.points || 0) - Number(b.points || 0)) * dir;
+      return pts !== 0 ? pts : so;
     }
     if (state.questSortBy === "difficulty") {
-      return ((difficultyOrder[a.difficulty || "easy"] || 0) - (difficultyOrder[b.difficulty || "easy"] || 0)) * dir;
+      const diff = ((difficultyOrder[a.difficulty || "easy"] || 0) - (difficultyOrder[b.difficulty || "easy"] || 0)) * dir;
+      return diff !== 0 ? diff : so;
     }
+    // default: sort_order desc first, then published_date
+    if (so !== 0) return so;
     const da = String(a.published_date || "");
     const db = String(b.published_date || "");
     return da.localeCompare(db) * dir;
   });
+
+  // For non-admin users (and admin in list tab), cap visible daily/weekly by refreshSettings.
+  const applyVisibilityCap = state.role !== "admin" || state.activeAdminQuestTab === "list";
+  if (applyVisibilityCap) {
+    const questStates = state.progress.quest_states || {};
+    const completedIds = new Set(state.progress.completed_quest_ids || []);
+    const inProgress = (q) => {
+      const s = questStates[q.id] || "";
+      return completedIds.has(q.id) || s === "accepted" || s === "submitted" || s === "approved" || s === "rejected";
+    };
+
+    const dailyLimit = Number(state.refreshSettings.daily_count ?? 5);
+    const weeklyLimit = Number(state.refreshSettings.weekly_count ?? 10);
+    let dailyShown = 0;
+    let weeklyShown = 0;
+
+    quests = quests.filter((q) => {
+      // quests with sort_order < 0 are explicitly hidden
+      if (Number(q.sort_order ?? 0) < 0) return false;
+      const cat = getQuestCategory(q);
+      if (inProgress(q)) return true;
+      if (cat === "daily") {
+        if (dailyShown < dailyLimit) { dailyShown++; return true; }
+        return false;
+      }
+      if (cat === "weekly") {
+        if (weeklyShown < weeklyLimit) { weeklyShown++; return true; }
+        return false;
+      }
+      return true; // event / other: show all
+    });
+  }
 
   return quests;
 }
@@ -544,30 +920,31 @@ function getVisibleQuests() {
 function renderQuests() {
   const list = $("#quest-list");
   const nav = $("#quest-category-nav");
+  if (!list) return;
   list.innerHTML = "";
   if (nav) nav.innerHTML = "";
 
   const quests = getVisibleQuests();
-  if (!quests.length) {
-    list.innerHTML = '<div class="muted">目前沒有符合條件的任務。</div>';
-    return;
-  }
-
-  const statusText = {
-    accepted: "已承接",
-    submitted: "待審核",
-    rejected: "已退回",
-    approved: "已通過",
-  };
-
-  const completedIds = state.progress.completed_quest_ids || [];
   const questStates = state.progress.quest_states || {};
+  const completedIds = state.progress.completed_quest_ids || [];
   const claimedBonuses = state.progress.claimed_category_bonuses || [];
 
-  // Group quests by category
+  // In database tab, show all quests (including hidden ones) for admin operations.
+  const isAdminDatabaseMode = state.role === "admin" && state.activeAdminQuestTab === "database";
+  const displayQuests = isAdminDatabaseMode
+    ? (() => {
+        const all = [...state.quests];
+        all.sort((a, b) => {
+          const so = Number(b.sort_order ?? 0) - Number(a.sort_order ?? 0);
+          return so !== 0 ? so : String(b.published_date || "").localeCompare(String(a.published_date || ""));
+        });
+        return all;
+      })()
+    : quests;
+
   const grouped = {};
   for (const cat of CATEGORY_ORDER) grouped[cat] = [];
-  quests.forEach((q) => grouped[getQuestCategory(q)].push(q));
+  displayQuests.forEach((q) => grouped[getQuestCategory(q)].push(q));
 
   const allForNav = ["all", ...CATEGORY_ORDER];
   const categoryLabel = {
@@ -593,7 +970,7 @@ function renderQuests() {
 
   if (nav) {
     allForNav.forEach((cat) => {
-      const source = cat === "all" ? quests : grouped[cat];
+      const source = cat === "all" ? displayQuests : grouped[cat];
       const remaining = source.filter(isUnfinished).length;
       const tab = document.createElement("button");
       tab.type = "button";
@@ -609,11 +986,37 @@ function renderQuests() {
   }
 
   const activeCategory = state.activeQuestCategory || "all";
-  const activeQuests = activeCategory === "all" ? quests : grouped[activeCategory] || [];
+  const activeQuests = activeCategory === "all" ? displayQuests : grouped[activeCategory] || [];
 
   if (!activeQuests.length) {
     list.innerHTML = '<div class="muted">此分類目前沒有任務。</div>';
     return;
+  }
+
+  // Compute which quest IDs are visible in the user-facing capped pool.
+  const userVisibleIds = new Set();
+  if (state.role === "admin") {
+    const dailyLimit = Number(state.refreshSettings.daily_count ?? 5);
+    const weeklyLimit = Number(state.refreshSettings.weekly_count ?? 10);
+    let dc = 0;
+    let wc = 0;
+    for (const q of quests) {
+      if (Number(q.sort_order ?? 0) < 0) continue;
+      const cat = getQuestCategory(q);
+      if (cat === "daily") {
+        if (dc < dailyLimit) {
+          userVisibleIds.add(q.id);
+          dc++;
+        }
+      } else if (cat === "weekly") {
+        if (wc < weeklyLimit) {
+          userVisibleIds.add(q.id);
+          wc++;
+        }
+      } else {
+        userVisibleIds.add(q.id);
+      }
+    }
   }
 
   activeQuests.forEach((q) => {
@@ -626,14 +1029,32 @@ function renderQuests() {
 
     let actions = "";
     let selectHtml = "";
+    let visibleBadge = "";
     if (state.role === "admin") {
       selectHtml = `<label class="quest-select-wrap"><input type="checkbox" data-select-quest="${q.id}" ${state.selectedQuestIds[q.id] ? "checked" : ""}> 勾選</label>`;
-      actions = `
-        <div class="review-actions">
-          <button class="btn-wood btn-sm btn-accent" data-edit-quest="${q.id}" type="button">編輯</button>
-          <button class="btn-wood btn-sm btn-brand" data-delete-quest="${q.id}" type="button">刪除</button>
-        </div>
-      `;
+      if (isAdminDatabaseMode) {
+        const isVisible = userVisibleIds.has(q.id);
+        const promoteBtn = !isVisible
+          ? `<button class="btn-wood btn-sm btn-accent" data-promote-quest="${q.id}" type="button">⬆ 加入清單</button>`
+          : `<button class="btn-wood btn-sm" data-demote-quest="${q.id}" type="button">⬇ 移出清單</button>`;
+        actions = `
+          <div class="review-actions">
+            ${promoteBtn}
+            <button class="btn-wood btn-sm btn-accent" data-edit-quest="${q.id}" type="button">編輯</button>
+            <button class="btn-wood btn-sm btn-brand" data-delete-quest="${q.id}" type="button">刪除</button>
+          </div>
+        `;
+      } else {
+        actions = `
+          <div class="review-actions">
+            <button class="btn-wood btn-sm btn-accent" data-edit-quest="${q.id}" type="button">編輯</button>
+            <button class="btn-wood btn-sm btn-brand" data-delete-quest="${q.id}" type="button">刪除</button>
+          </div>
+        `;
+      }
+      visibleBadge = userVisibleIds.has(q.id)
+        ? '<span class="pill pill-visible">👁 用戶可見</span>'
+        : '<span class="pill pill-hidden">🙈 用戶不可見</span>';
     } else if (completed) {
       actions = '<button class="btn-ghost" disabled>已完成</button>';
     } else if (questState === "submitted") {
@@ -658,6 +1079,7 @@ function renderQuests() {
           <strong>${q.title}</strong>
           <span class="pill">+${q.points} 點</span>
           <span class="pill">${catLabel}</span>
+          ${visibleBadge}
         </div>
       </div>
       <div class="quest-item-body">
@@ -710,11 +1132,25 @@ function renderRewards() {
   }
 
   state.rewards.forEach((r) => {
+    const isAdmin = state.role === "admin";
     const claimed = state.progress.claimed_reward_ids.includes(r.id);
     const canClaim = state.progress.points >= r.cost_points;
 
     const card = document.createElement("article");
     card.className = `reward-card${claimed ? " is-claimed" : ""}${!canClaim && !claimed ? " no-points" : ""}`;
+    const actionHtml = isAdmin
+      ? `
+        <div class="review-actions">
+          <button class="btn-wood btn-sm btn-accent" type="button" data-edit-reward="${r.id}">編輯</button>
+          <button class="btn-wood btn-sm btn-brand" type="button" data-delete-reward="${r.id}">刪除</button>
+        </div>
+      `
+      : `
+        <button class="reward-card-btn${claimed ? " btn-ghost" : canClaim ? " btn-accent" : " btn-ghost"}"
+          data-claim="${r.id}" ${claimed || !canClaim ? "disabled" : ""}>
+          ${claimed ? "✓ 已兌換" : canClaim ? "兌換" : "點數不足"}
+        </button>
+      `;
     card.innerHTML = `
       <div class="reward-card-img-wrap">
         ${r.image_path
@@ -725,10 +1161,7 @@ function renderRewards() {
       <div class="reward-card-body">
         <div class="reward-card-title">${r.title}</div>
         <div class="reward-card-desc">${r.description}</div>
-        <button class="reward-card-btn${claimed ? " btn-ghost" : canClaim ? " btn-accent" : " btn-ghost"}"
-          data-claim="${r.id}" ${claimed || !canClaim ? "disabled" : ""}>
-          ${claimed ? "✓ 已兌換" : canClaim ? "兌換" : "點數不足"}
-        </button>
+        ${actionHtml}
       </div>
     `;
     list.appendChild(card);
@@ -1028,62 +1461,112 @@ function renderSubmissions() {
 }
 
 async function refreshAll() {
-  state.userId = state.userId || DEFAULT_USER_ID;
+  showGlobalLoading("資料載入中，請稍後...");
+  try {
+    state.userId = state.userId || DEFAULT_USER_ID;
+    const activeJournalDate = $("#journal-date")?.value || state.dailyJournal.log_date || todayIso();
 
-  const [progress, quests, rewards, announcements, giftboxMails, playerClaims] = await Promise.all([
-    api(`/api/progress/${encodeURIComponent(state.userId)}`),
-    api("/api/quests"),
-    api("/api/rewards"),
-    api("/api/announcements"),
-    api(`/api/giftbox/${encodeURIComponent(state.userId)}`),
-    api(`/api/claims/${encodeURIComponent(state.userId)}`),
-  ]);
-
-  state.progress = progress;
-  state.quests = quests;
-  state.rewards = rewards;
-  state.announcements = announcements;
-  state.giftboxMails = giftboxMails;
-  state.playerClaims = playerClaims;
-
-  if (state.role === "admin") {
-    const [claims, submissions, templates, settings, deleted, giftHistory] = await Promise.all([
-      api("/api/claims"),
-      api("/api/quest-submissions"),
-      api("/api/quest-templates"),
-      api("/api/quest-refresh-settings"),
-      api("/api/quests/deleted-recent"),
-      api("/api/giftbox-history"),
+    const questsPath = state.role === "admin" ? "/api/quests?include_future=true" : "/api/quests";
+    const [progress, quests, rewards, announcements, giftboxMails, playerClaims] = await Promise.all([
+      api(`/api/progress/${encodeURIComponent(state.userId)}`),
+      api(questsPath),
+      api("/api/rewards"),
+      api("/api/announcements"),
+      api(`/api/giftbox/${encodeURIComponent(state.userId)}`),
+      api(`/api/claims/${encodeURIComponent(state.userId)}`),
     ]);
-    state.claims = claims;
-    state.submissions = submissions;
-    state.questTemplates = templates;
-    state.refreshSettings = settings;
-    state.deletedQuests = deleted;
-    state.giftboxHistory = giftHistory;
-    if ($("#refresh-daily-count")) $("#refresh-daily-count").value = String(settings.daily_count ?? 3);
-    if ($("#refresh-weekly-count")) $("#refresh-weekly-count").value = String(settings.weekly_count ?? 2);
-  } else {
-    state.claims = [];
-    state.submissions = [];
-    state.questTemplates = [];
-    state.deletedQuests = [];
-    state.giftboxHistory = [];
-  }
 
-  renderStats();
-  renderQuests();
-  renderRewards();
-  renderClaims();
-  renderPlayerClaimHistory();
-  renderMallNav();
-  renderSubmissions();
-  renderAnnouncements();
-  renderGiftbox();
-  renderGiftboxBadge();
-  renderTemplateList();
-  renderDeletedQuests();
-  renderGiftHistory();
+    state.progress = progress;
+    state.quests = quests;
+    state.rewards = rewards;
+    state.announcements = announcements;
+    state.giftboxMails = giftboxMails;
+    state.playerClaims = playerClaims;
+
+    if (state.role === "admin") {
+      const [claims, submissions, templates, settings, deleted, giftHistory, eventSchedules] = await Promise.all([
+        api("/api/claims"),
+        api("/api/quest-submissions"),
+        api("/api/quest-templates"),
+        api("/api/quest-refresh-settings"),
+        api("/api/quests/deleted-recent"),
+        api("/api/giftbox-history"),
+        api("/api/event-schedules"),
+      ]);
+      state.claims = claims;
+      state.submissions = submissions;
+      state.questTemplates = templates;
+      state.refreshSettings = settings;
+      state.deletedQuests = deleted;
+      state.giftboxHistory = giftHistory;
+      state.eventSchedules = Array.isArray(eventSchedules) ? eventSchedules : [];
+
+      // admin fetches all wishes
+      const allWishes = await api("/api/wishes");
+      state.wishes = Array.isArray(allWishes) ? allWishes : [];
+
+      const userIds = new Set();
+      userIds.add(DEFAULT_USER_ID);
+      claims.forEach((c) => c?.user_id && userIds.add(String(c.user_id)));
+      submissions.forEach((s) => s?.user_id && userIds.add(String(s.user_id)));
+      giftHistory.forEach((h) => h?.user_id && userIds.add(String(h.user_id)));
+
+      const pointsRows = await Promise.all(
+        Array.from(userIds).map(async (userId) => {
+          const progressItem = await api(`/api/progress/${encodeURIComponent(userId)}`);
+          return {
+            user_id: userId,
+            points: Number(progressItem.points || 0),
+            completed_count: Number(progressItem.completed_count || 0),
+            claimed_count: Number(progressItem.claimed_count || 0),
+          };
+        })
+      );
+      pointsRows.sort((a, b) => b.points - a.points || a.user_id.localeCompare(b.user_id));
+      state.userPointsSummary = pointsRows;
+
+      if ($("#refresh-daily-count")) $("#refresh-daily-count").value = String(settings.daily_count ?? 5);
+      if ($("#refresh-weekly-count")) $("#refresh-weekly-count").value = String(settings.weekly_count ?? 10);
+    } else {
+      state.claims = [];
+      state.submissions = [];
+      state.questTemplates = [];
+      state.deletedQuests = [];
+      state.giftboxHistory = [];
+      state.userPointsSummary = [];
+    state.eventSchedules = [];
+    state.wishes = [];
+      state.wishes = [];
+      // user fetches own wishes
+      try {
+        const myWishes = await api(`/api/wishes?user_id=${encodeURIComponent(state.userId)}`);
+        state.wishes = Array.isArray(myWishes) ? myWishes : [];
+      } catch { state.wishes = []; }
+    }
+
+    renderStats();
+    renderQuests();
+    renderRewards();
+    renderClaims();
+    renderPlayerClaimHistory();
+    renderMallNav();
+    renderSubmissions();
+    renderAnnouncements();
+    renderGiftbox();
+    renderGiftboxBadge();
+    renderTemplateList();
+    renderDeletedQuests();
+    renderGiftHistory();
+    renderAdminUserPoints();
+    renderEventSchedules();
+    renderWishes();
+    renderAdminQuestNav();
+    applyAdminQuestTabVisibility();
+    await loadDailyJournalByDate(activeJournalDate);
+  } finally {
+    restoreAllLoadingButtons();
+    hideGlobalLoading();
+  }
 }
 
 function onMallNavClick(event) {
@@ -1093,9 +1576,32 @@ function onMallNavClick(event) {
   renderMallNav();
 }
 
+function onAdminQuestNavClick(event) {
+  const tabBtn = event.target?.closest ? event.target.closest("[data-admin-quest-tab]") : null;
+  const tab = tabBtn?.getAttribute("data-admin-quest-tab");
+  if (!tab) return;
+  event.preventDefault?.();
+  state.activeAdminQuestTab = tab;
+  renderAdminQuestNav();
+  applyAdminQuestTabVisibility();
+
+  const targetId = tab === "create"
+    ? "admin-quest-form-panel"
+    : tab === "review"
+      ? "admin-review-board"
+      : tab === "journal"
+        ? "daily-journal-board"
+      : tab === "database"
+        ? "admin-template-board"
+        : "quest-list-board";
+  document.getElementById(targetId)?.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
 function resetQuestForm() {
   $("#quest-form").reset();
   if ($("#q-due-date")) $("#q-due-date").value = "";
+  if ($("#q-category")) $("#q-category").value = "daily";
+  onQuestCategoryChange();
   state.editingQuestId = null;
   const submitBtn = $("#quest-submit-btn");
   if (submitBtn) {
@@ -1115,6 +1621,7 @@ async function createQuest(event) {
       description: $("#q-description").value.trim(),
       points: Number($("#q-points").value),
       difficulty: $("#q-difficulty").value,
+      category: $("#q-category").value,
       published_date: $("#q-published-date").value,
       due_date: $("#q-due-date").value,
     };
@@ -1146,7 +1653,11 @@ async function createReward(event) {
   const btn = event.target.querySelector('button[type="submit"]');
   btnLoading(btn);
   try {
-    let imagePath = $("#r-image").value.trim();
+    let imagePath = "";
+    if (state.editingRewardId) {
+      const current = state.rewards.find((r) => r.id === state.editingRewardId);
+      imagePath = current?.image_path || "";
+    }
     const imageFile = $("#r-image-file").files?.[0];
     if (imageFile) {
       const formData = new FormData();
@@ -1162,17 +1673,37 @@ async function createReward(event) {
       image_path: imagePath,
     };
 
-    await api("/api/rewards", {
-      method: "POST",
-      body: JSON.stringify(payload),
-    });
+    if (state.editingRewardId) {
+      await api(`/api/rewards/${state.editingRewardId}`, {
+        method: "PUT",
+        body: JSON.stringify(payload),
+      });
+      setMessage("獎勵更新成功");
+    } else {
+      await api("/api/rewards", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+      setMessage("獎勵新增成功");
+    }
 
-    event.target.reset();
-    setMessage("獎勵新增成功");
+    resetRewardForm();
     await refreshAll();
   } catch (err) {
     btnRestore(btn);
     throw err;
+  }
+}
+
+function resetRewardForm() {
+  const form = $("#reward-form");
+  form?.reset();
+  state.editingRewardId = null;
+  const submitBtn = form?.querySelector('button[type="submit"]');
+  if (submitBtn) {
+    submitBtn.textContent = "＋ 建立獎勵";
+    submitBtn.classList.remove("btn-brand");
+    submitBtn.classList.add("btn-accent");
   }
 }
 
@@ -1190,6 +1721,12 @@ function btnRestore(btn) {
   delete btn.dataset.origText;
 }
 
+function restoreAllLoadingButtons() {
+  document.querySelectorAll("button[data-orig-text]").forEach((btn) => {
+    btnRestore(btn);
+  });
+}
+
 async function onListClick(event) {
   const tabBtn = event.target.closest("[data-cat-tab]");
   if (tabBtn) {
@@ -1204,6 +1741,8 @@ async function onListClick(event) {
   const abandonId = event.target.getAttribute("data-abandon");
   const submitProofId = event.target.getAttribute("data-submit-proof");
   const claimId = event.target.getAttribute("data-claim");
+  const editRewardId = event.target.getAttribute("data-edit-reward");
+  const deleteRewardId = event.target.getAttribute("data-delete-reward");
   const editQuestId = event.target.getAttribute("data-edit-quest");
   const deleteQuestId = event.target.getAttribute("data-delete-quest");
   const claimCategoryBtn = event.target.closest("[data-claim-category]");
@@ -1288,14 +1827,19 @@ async function onListClick(event) {
 
   if (editQuestId) {
     const quest = state.quests.find((q) => q.id === editQuestId);
-    if (!quest) {
-      return;
-    }
+    if (!quest) return;
+    // Switch to create tab so the form is visible
+    state.activeAdminQuestTab = "create";
+    applyAdminQuestTabVisibility();
     state.editingQuestId = quest.id;
     $("#q-title").value = quest.title || "";
     $("#q-description").value = quest.description || "";
     $("#q-points").value = quest.points || "";
     $("#q-difficulty").value = quest.difficulty || "easy";
+    if ($("#q-category")) {
+      $("#q-category").value = quest.category || "other";
+      onQuestCategoryChange();
+    }
     $("#q-published-date").value = quest.published_date || "";
     $("#q-due-date").value = quest.due_date || "";
     const submitBtn = $("#quest-submit-btn");
@@ -1309,9 +1853,7 @@ async function onListClick(event) {
 
   if (deleteQuestId) {
     const ok = window.confirm("確定要刪除這個任務嗎？");
-    if (!ok) {
-      return;
-    }
+    if (!ok) return;
     btnLoading(btn);
     try {
       await api(`/api/quests/${deleteQuestId}`, { method: "DELETE" });
@@ -1320,11 +1862,70 @@ async function onListClick(event) {
       setMessage(err.message, true);
       return;
     }
-    if (state.editingQuestId === deleteQuestId) {
-      resetQuestForm();
-    }
+    if (state.editingQuestId === deleteQuestId) resetQuestForm();
     setMessage("任務已刪除");
     await refreshAll();
+  }
+
+  const promoteQuestId = event.target.getAttribute("data-promote-quest");
+  if (promoteQuestId) {
+    btnLoading(btn);
+    try {
+      const result = await api(`/api/quests/${promoteQuestId}/promote`, { method: "POST" });
+      setMessage(result.message || "已加入清單");
+      await refreshAll();
+    } catch (err) { btnRestore(btn); setMessage(err.message, true); }
+    return;
+  }
+
+  const demoteQuestId = event.target.getAttribute("data-demote-quest");
+  if (demoteQuestId) {
+    btnLoading(btn);
+    try {
+      const result = await api(`/api/quests/${demoteQuestId}/demote`, { method: "POST" });
+      setMessage(result.message || "已從清單移除");
+      await refreshAll();
+    } catch (err) { btnRestore(btn); setMessage(err.message, true); }
+    return;
+  }
+
+  const selectDeletedId = event.target.getAttribute("data-select-deleted");
+  if (selectDeletedId) {
+    if (event.target.checked) {
+      state.selectedDeletedIds[selectDeletedId] = true;
+    } else {
+      delete state.selectedDeletedIds[selectDeletedId];
+    }
+    return;
+  }
+
+  const restoreDeletedId = event.target.getAttribute("data-restore-deleted");
+  if (restoreDeletedId) {
+    btnLoading(btn);
+    try {
+      const result = await api(`/api/quests/deleted-recent/${restoreDeletedId}/restore`, { method: "POST" });
+      setMessage(result.message || "已回復");
+      delete state.selectedDeletedIds[restoreDeletedId];
+      state.deletedQuests = await api("/api/quests/deleted-recent");
+      renderDeletedQuests();
+      await refreshAll();
+    } catch (err) { btnRestore(btn); setMessage(err.message, true); }
+    return;
+  }
+
+  const permDeleteDeletedId = event.target.getAttribute("data-perm-delete-deleted");
+  if (permDeleteDeletedId) {
+    if (!window.confirm("確定要永久刪除這筆紀錄？")) return;
+    btnLoading(btn);
+    try {
+      await api(`/api/quests/deleted-recent/${permDeleteDeletedId}`, { method: "DELETE" });
+      setMessage("已永久刪除");
+      delete state.selectedDeletedIds[permDeleteDeletedId];
+      state.deletedQuests = await api("/api/quests/deleted-recent");
+      renderDeletedQuests();
+      btnRestore(btn);
+    } catch (err) { btnRestore(btn); setMessage(err.message, true); }
+    return;
   }
 
   if (claimId) {
@@ -1332,6 +1933,41 @@ async function onListClick(event) {
     try {
       await api(`/api/rewards/${claimId}/claim/${encodeURIComponent(state.userId)}`, { method: "POST" });
       setMessage("獎勵兌換成功");
+    } catch (err) {
+      btnRestore(btn);
+      setMessage(err.message, true);
+      return;
+    }
+    await refreshAll();
+  }
+
+  if (editRewardId) {
+    const reward = state.rewards.find((r) => r.id === editRewardId);
+    if (!reward) return;
+    state.editingRewardId = reward.id;
+    $("#r-title").value = reward.title || "";
+    $("#r-description").value = reward.description || "";
+    $("#r-cost").value = reward.cost_points || "";
+    const submitBtn = $("#reward-form")?.querySelector('button[type="submit"]');
+    if (submitBtn) {
+      submitBtn.textContent = "✔ 更新獎勵";
+      submitBtn.classList.remove("btn-accent");
+      submitBtn.classList.add("btn-brand");
+    }
+    $("#r-title")?.scrollIntoView({ behavior: "smooth", block: "center" });
+    return;
+  }
+
+  if (deleteRewardId) {
+    const ok = window.confirm("確定要刪除這個獎勵嗎？");
+    if (!ok) return;
+    btnLoading(btn);
+    try {
+      await api(`/api/rewards/${deleteRewardId}`, { method: "DELETE" });
+      if (state.editingRewardId === deleteRewardId) {
+        resetRewardForm();
+      }
+      setMessage("獎勵已刪除");
     } catch (err) {
       btnRestore(btn);
       setMessage(err.message, true);
@@ -1458,8 +2094,9 @@ async function onQuestAdminAction(event) {
         method: "POST",
         body: JSON.stringify({ daily_count: daily, weekly_count: weekly }),
       });
+      state.refreshSettings = { daily_count: daily, weekly_count: weekly };
       setMessage(result.message || "刷新設定已更新");
-      await refreshAll();
+      btnRestore(target);
     } catch (err) {
       btnRestore(target);
       setMessage(err.message, true);
@@ -1552,9 +2189,417 @@ function bindQuestToolbar() {
   });
 }
 
+function onQuestCategoryChange() {
+  const cat = $("#q-category")?.value;
+  const dateFields = $("#q-date-fields");
+  if (!dateFields) return;
+  const showDates = cat === "event" || cat === "other";
+  dateFields.classList.toggle("is-hidden", !showDates);
+  if (!showDates) {
+    if ($("#q-published-date")) $("#q-published-date").value = "";
+    if ($("#q-due-date")) $("#q-due-date").value = "";
+  }
+}
+
+function renderEventAdminNav() {
+  const nav = $("#event-admin-nav");
+  if (!nav) return;
+  const tabs = nav.querySelectorAll("[data-event-admin-tab]");
+  const allowed = new Set(["create", "preview", "list"]);
+  if (!allowed.has(state.activeEventAdminTab)) {
+    state.activeEventAdminTab = "create";
+  }
+  tabs.forEach((btn) => {
+    const tab = btn.getAttribute("data-event-admin-tab");
+    btn.classList.toggle("active", tab === state.activeEventAdminTab);
+  });
+}
+
+function applyEventAdminTabVisibility() {
+  const createBoard = $("#event-create-board");
+  const previewBoard = $("#event-preview-board");
+  const listBoard = $("#event-list-board");
+  if (!createBoard || !previewBoard || !listBoard) return;
+
+  createBoard.classList.toggle("is-hidden", state.activeEventAdminTab !== "create");
+  previewBoard.classList.toggle("is-hidden", state.activeEventAdminTab !== "preview");
+  listBoard.classList.toggle("is-hidden", state.activeEventAdminTab !== "list");
+}
+
+function onEventAdminNavClick(event) {
+  const tab = event.target.closest("[data-event-admin-tab]")?.getAttribute("data-event-admin-tab");
+  if (!tab) return;
+  state.activeEventAdminTab = tab;
+  renderEventAdminNav();
+  applyEventAdminTabVisibility();
+}
+
+async function onQuestXlsxUpload(event) {
+  const file = event.target.files?.[0];
+  if (!file) return;
+  const statusEl = $("#quest-xlsx-status");
+  if (statusEl) statusEl.textContent = "匯入中...";
+  const formData = new FormData();
+  formData.append("file", file);
+  try {
+    const result = await fetch("/api/quests/import-xlsx", { method: "POST", body: formData })
+      .then(async (res) => {
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(json.detail?.message || "匯入失敗");
+        return json;
+      });
+    if (statusEl) statusEl.textContent = result.message || "匯入完成";
+    setMessage(result.message || "匯入完成");
+    if (result.errors?.length) setMessage(result.message, true);
+    await refreshAll();
+  } catch (err) {
+    if (statusEl) statusEl.textContent = "匯入失敗";
+    setMessage(err.message, true);
+  }
+  event.target.value = "";
+}
+
+async function onEventXlsxUpload(event) {
+  const file = event.target.files?.[0];
+  if (!file) return;
+  const statusEl = $("#event-xlsx-status");
+  if (statusEl) statusEl.textContent = "匯入中...";
+  const formData = new FormData();
+  formData.append("file", file);
+  try {
+    const result = await fetch("/api/event-schedules/import-xlsx", { method: "POST", body: formData })
+      .then(async (res) => {
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(json.detail?.message || "匯入失敗");
+        return json;
+      });
+    state.importedEventQuests = Array.isArray(result.imported_quests) ? result.imported_quests : [];
+    renderImportedEventQuestPreview();
+    state.activeEventAdminTab = "preview";
+    renderEventAdminNav();
+    applyEventAdminTabVisibility();
+    const msg = result.message || `活動任務已匯入：${result.quests_created || 0} 筆（不會自動發布活動）`;
+    if (statusEl) statusEl.textContent = msg;
+    if (result.errors?.length && statusEl) {
+      const sample = result.errors.slice(0, 2).join("；");
+      statusEl.textContent = `${msg} ｜ ${sample}${result.errors.length > 2 ? " …" : ""}`;
+    }
+    setMessage(msg, !!(result.errors?.length));
+    await refreshAll();
+  } catch (err) {
+    if (statusEl) statusEl.textContent = "匯入失敗";
+    setMessage(err.message, true);
+  }
+  event.target.value = "";
+}
+
+function renderImportedEventQuestPreview() {
+  const list = $("#event-import-preview-list");
+  const countEl = $("#event-import-preview-count");
+  if (!list) return;
+
+  const tasks = state.importedEventQuests || [];
+  if (countEl) countEl.textContent = String(tasks.length);
+  list.innerHTML = "";
+  if (!tasks.length) {
+    list.innerHTML = '<div class="muted">目前沒有本次匯入任務，請先於「新增活動排程」頁匯入 xlsx。</div>';
+    return;
+  }
+
+  tasks.forEach((q) => {
+    const row = document.createElement("article");
+    row.className = "item";
+    row.setAttribute("data-imported-event-quest-id", q.id || "");
+    row.innerHTML = `
+      <div class="item-head">
+        <strong>任務 ID：${q.id || "-"}</strong>
+        <span class="pill">活動任務</span>
+      </div>
+      <div class="quest-toolbar">
+        <label class="field-label">任務名稱
+          <input data-event-import-field="title" value="${q.title || ""}" maxlength="80" />
+        </label>
+        <label class="field-label">點數
+          <input data-event-import-field="points" type="number" min="1" max="999" value="${Number(q.points || 1)}" />
+        </label>
+        <label class="field-label">難度
+          <select data-event-import-field="difficulty">
+            <option value="easy" ${q.difficulty === "easy" ? "selected" : ""}>簡單</option>
+            <option value="medium" ${q.difficulty === "medium" ? "selected" : ""}>普通</option>
+            <option value="hard" ${q.difficulty === "hard" ? "selected" : ""}>困難</option>
+          </select>
+        </label>
+      </div>
+      <label class="field-label">任務描述
+        <textarea data-event-import-field="description" maxlength="240">${q.description || ""}</textarea>
+      </label>
+      <div class="quest-toolbar">
+        <label class="field-label">發布日期（可空）
+          <input data-event-import-field="published_date" type="date" value="${q.published_date || ""}" />
+        </label>
+        <label class="field-label">截止日期（可空）
+          <input data-event-import-field="due_date" type="date" value="${q.due_date || ""}" />
+        </label>
+      </div>
+      <div class="review-actions">
+        <button class="btn-wood btn-sm btn-accent" type="button" data-save-imported-event-quest="${q.id}">💾 儲存這筆</button>
+        <button class="btn-wood btn-sm btn-brand" type="button" data-delete-imported-event-quest="${q.id}">🗑 刪除這筆</button>
+      </div>
+    `;
+    list.appendChild(row);
+  });
+}
+
+async function onImportedEventPreviewClick(event) {
+  const saveId = event.target.getAttribute("data-save-imported-event-quest");
+  const deleteId = event.target.getAttribute("data-delete-imported-event-quest");
+  if (!saveId && !deleteId) return;
+
+  const btn = event.target.closest("button") || event.target;
+  const row = event.target.closest("[data-imported-event-quest-id]");
+  if (!row) return;
+
+  if (saveId) {
+    const title = row.querySelector('[data-event-import-field="title"]')?.value?.trim() || "";
+    const description = row.querySelector('[data-event-import-field="description"]')?.value?.trim() || "";
+    const points = Number(row.querySelector('[data-event-import-field="points"]')?.value || 0);
+    const difficulty = row.querySelector('[data-event-import-field="difficulty"]')?.value || "easy";
+    const published_date = row.querySelector('[data-event-import-field="published_date"]')?.value || "";
+    const due_date = row.querySelector('[data-event-import-field="due_date"]')?.value || "";
+
+    if (!title) {
+      setMessage("任務名稱不可為空", true);
+      return;
+    }
+    if (!description) {
+      setMessage("任務描述不可為空", true);
+      return;
+    }
+    if (!(points >= 1 && points <= 999)) {
+      setMessage("點數需在 1 到 999 之間", true);
+      return;
+    }
+
+    btnLoading(btn);
+    try {
+      await api(`/api/quests/${saveId}`, {
+        method: "PUT",
+        body: JSON.stringify({
+          title,
+          description,
+          points,
+          difficulty,
+          category: "event",
+          published_date,
+          due_date,
+        }),
+      });
+      state.importedEventQuests = state.importedEventQuests.map((q) =>
+        q.id === saveId
+          ? { ...q, title, description, points, difficulty, published_date, due_date, category: "event" }
+          : q
+      );
+      setMessage("匯入任務已更新");
+      btnRestore(btn);
+      await refreshAll();
+    } catch (err) {
+      btnRestore(btn);
+      setMessage(err.message, true);
+    }
+    return;
+  }
+
+  if (deleteId) {
+    const confirmed = await showConfirmModal("確定刪除這筆匯入任務？");
+    if (!confirmed) return;
+    btnLoading(btn);
+    try {
+      await api(`/api/quests/${deleteId}`, { method: "DELETE" });
+      state.importedEventQuests = state.importedEventQuests.filter((q) => q.id !== deleteId);
+      renderImportedEventQuestPreview();
+      setMessage("匯入任務已刪除");
+      btnRestore(btn);
+      await refreshAll();
+    } catch (err) {
+      btnRestore(btn);
+      setMessage(err.message, true);
+    }
+  }
+}
+
+function renderEventSchedules() {
+  const list = $("#event-schedule-list");
+  if (!list) return;
+  list.innerHTML = "";
+  if (!state.eventSchedules.length) {
+    list.innerHTML = '<div class="muted">目前沒有活動排程。</div>';
+    return;
+  }
+  state.eventSchedules.forEach((ev) => {
+    const item = document.createElement("article");
+    item.className = "item";
+    const mult = Number(ev.point_multiplier || 1);
+    const multHtml = mult > 1 ? `<span class="pill">點數 x${mult}</span>` : "";
+    item.innerHTML = `
+      <div class="item-head">
+        <strong>${ev.title || "未命名活動"}</strong>
+        <span class="pill">${ev.start_date || "-"} ～ ${ev.end_date || "-"}</span>
+        ${multHtml}
+      </div>
+      <div class="muted">${ev.description || ""}</div>
+      <div class="review-actions">
+        <button class="btn-wood btn-sm btn-brand" type="button" data-delete-event="${ev.id}">刪除活動</button>
+      </div>
+    `;
+    list.appendChild(item);
+  });
+}
+
+async function createEventSchedule(event) {
+  event.preventDefault();
+  const btn = event.target.querySelector('button[type="submit"]');
+  btnLoading(btn);
+  try {
+    const payload = {
+      title: $("#ev-title").value.trim(),
+      description: $("#ev-description").value.trim(),
+      start_date: $("#ev-start-date").value,
+      end_date: $("#ev-end-date").value,
+      point_multiplier: Number($("#ev-multiplier").value) || 1.0,
+      announcement_title: $("#ev-ann-title").value.trim(),
+      announcement_content: $("#ev-ann-content").value.trim(),
+      announcement_event_time: $("#ev-ann-time").value.trim(),
+      auto_announce: $("#ev-auto-announce").checked,
+    };
+    const result = await api("/api/event-schedules", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+    event.target.reset();
+    $("#ev-multiplier").value = "1";
+    $("#ev-auto-announce").checked = true;
+    state.importedEventQuests = [];
+    renderImportedEventQuestPreview();
+    state.activeEventAdminTab = "list";
+    renderEventAdminNav();
+    applyEventAdminTabVisibility();
+    setMessage(result.message || "活動排程已建立");
+    await refreshAll();
+  } catch (err) {
+    btnRestore(btn);
+    setMessage(err.message, true);
+  }
+}
+
+async function onEventScheduleListClick(event) {
+  const deleteId = event.target.getAttribute("data-delete-event");
+  if (!deleteId) return;
+  const btn = event.target.closest("button") || event.target;
+  const confirmed = await showConfirmModal("確定刪除此活動排程嗎？");
+  if (!confirmed) return;
+  btnLoading(btn);
+  try {
+    const result = await api(`/api/event-schedules/${deleteId}`, { method: "DELETE" });
+    setMessage(result.message || "活動已刪除");
+    await refreshAll();
+  } catch (err) {
+    btnRestore(btn);
+    setMessage(err.message, true);
+  }
+}
+
+function renderWishes() {
+  const list = $("#wish-list");
+  if (!list) return;
+  list.innerHTML = "";
+  if (!state.wishes.length) {
+    list.innerHTML = '<div class="muted">還沒有許願，先投入吧！</div>';
+    return;
+  }
+  const isAdmin = state.role === "admin";
+  state.wishes.forEach((wish) => {
+    const item = document.createElement("article");
+    item.className = "item" + (wish.is_fulfilled ? " wish-fulfilled" : "");
+    const fromHtml = isAdmin ? `<span class="pill">👤 ${wish.user_id || ""}</span>` : "";
+    const statusHtml = wish.is_fulfilled
+      ? '<span class="pill pill-success">✨ 已達成</span>'
+      : '<span class="pill pill-dim">⌛ 待達成</span>';
+    const adminActions = isAdmin
+      ? `<div class="review-actions">${
+          wish.is_fulfilled
+            ? ""
+            : `<button class="btn-wood btn-sm btn-accent" type="button" data-fulfill-wish="${wish.id}">✨ 標記達成</button>`
+        }<button class="btn-wood btn-sm btn-brand" type="button" data-delete-wish="${wish.id}">🗑 刪除</button></div>`
+      : "";
+    const safeName = wish.item_name ? `<strong>${wish.item_name}</strong> &mdash; ` : "";
+    const safeNote = wish.note ? `<div class="muted">${wish.note}</div>` : "";
+    item.innerHTML = `
+      <div class="item-head">
+        ${fromHtml}
+        ${statusHtml}
+        ${safeName}<a href="${wish.url}" target="_blank" rel="noopener noreferrer" class="wish-link">🔗 查看連結</a>
+      </div>
+      ${safeNote}
+      ${adminActions}
+    `;
+    list.appendChild(item);
+  });
+}
+
+async function submitWish(event) {
+  event.preventDefault();
+  const btn = event.target.querySelector('button[type="submit"]');
+  btnLoading(btn);
+  try {
+    const payload = {
+      url: $("#w-url").value.trim(),
+      item_name: $("#w-item-name").value.trim(),
+      note: $("#w-note").value.trim(),
+    };
+    const result = await api(`/api/wishes?user_id=${encodeURIComponent(state.userId)}`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+    event.target.reset();
+    setMessage(result.message || "許願成功！");
+    await refreshAll();
+  } catch (err) {
+    btnRestore(btn);
+    setMessage(err.message, true);
+  }
+}
+
+async function onWishListClick(event) {
+  const btn = event.target.closest("button") || event.target;
+  const fulfillId = event.target.getAttribute("data-fulfill-wish");
+  const deleteId = event.target.getAttribute("data-delete-wish");
+  if (fulfillId) {
+    const confirmed = await showConfirmModal("標記此願望為「已達成」？");
+    if (!confirmed) return;
+    btnLoading(btn);
+    try {
+      const result = await api(`/api/wishes/${fulfillId}/fulfill`, { method: "PATCH" });
+      setMessage(result.message || "已標記達成");
+      await refreshAll();
+    } catch (err) { btnRestore(btn); setMessage(err.message, true); }
+  } else if (deleteId) {
+    const confirmed = await showConfirmModal("確定刪除此願望？");
+    if (!confirmed) return;
+    btnLoading(btn);
+    try {
+      const result = await api(`/api/wishes/${deleteId}`, { method: "DELETE" });
+      setMessage(result.message || "已刪除");
+      await refreshAll();
+    } catch (err) { btnRestore(btn); setMessage(err.message, true); }
+  }
+}
+
 async function boot() {
   state.userId = DEFAULT_USER_ID;
   renderPlayerName();
+  if ($("#journal-date")) {
+    $("#journal-date").value = todayIso();
+  }
 
   $("#login-form").addEventListener("submit", onLogin);
   $("#quick-user-login").addEventListener("click", onQuickUserLogin);
@@ -1563,10 +2608,14 @@ async function boot() {
   $("#nav-announce-btn").addEventListener("click", () => showView("announce"));
   $("#nav-quests-btn").addEventListener("click", () => showView("quests"));
   $("#open-mall-btn").addEventListener("click", () => showView("mall"));
+  $("#nav-wish-btn")?.addEventListener("click", () => showView("wish"));
   $("#open-giftbox-btn").addEventListener("click", openGiftboxModal);
   $("#giftbox-close-btn").addEventListener("click", closeGiftboxModal);
 
   bindQuestToolbar();
+
+  $("#q-category")?.addEventListener("change", onQuestCategoryChange);
+  onQuestCategoryChange(); // set initial visibility
 
   const lastSession = localStorage.getItem(SESSION_KEY);
   if (lastSession) {
@@ -1612,6 +2661,7 @@ async function boot() {
 
   $("#quest-list").addEventListener("click", onListClick);
   $("#quest-category-nav").addEventListener("click", onListClick);
+  $("#admin-quest-nav")?.addEventListener("click", onAdminQuestNavClick);
   $("#mall-nav")?.addEventListener("click", onMallNavClick);
   $("#reward-list").addEventListener("click", onListClick);
   $("#announcement-list").addEventListener("click", async (event) => {
@@ -1650,6 +2700,69 @@ async function boot() {
   $("#admin-quest-tools")?.addEventListener("click", async (event) => {
     await onQuestAdminAction(event);
   });
+  // Bulk actions for deleted quests
+  $("#deleted-quest-list")?.addEventListener("click", async (event) => {
+    await onListClick(event);
+  });
+  $("#restore-selected-deleted-btn")?.addEventListener("click", async (event) => {
+    const actionBtn = event.target.closest("button") || event.target;
+    const ids = Object.keys(state.selectedDeletedIds).filter((id) => state.selectedDeletedIds[id]);
+    if (!ids.length) { setMessage("請先勾選要回復的紀錄", true); return; }
+    const confirmed = await showConfirmModal(`確定回復勾選的 ${ids.length} 筆任務嗎？`);
+    if (!confirmed) return;
+    btnLoading(actionBtn);
+    try {
+      for (const id of ids) await api(`/api/quests/deleted-recent/${id}/restore`, { method: "POST" });
+      state.selectedDeletedIds = {};
+      setMessage(`已回復 ${ids.length} 筆任務`);
+      state.deletedQuests = await api("/api/quests/deleted-recent");
+      renderDeletedQuests();
+      btnRestore(actionBtn);
+      await refreshAll();
+    } catch (err) { btnRestore(actionBtn); setMessage(err.message, true); }
+  });
+  $("#delete-selected-deleted-btn")?.addEventListener("click", async (event) => {
+    const actionBtn = event.target.closest("button") || event.target;
+    const ids = Object.keys(state.selectedDeletedIds).filter((id) => state.selectedDeletedIds[id]);
+    if (!ids.length) { setMessage("請先勾選要刪除的紀錄", true); return; }
+    const confirmed = await showConfirmModal(`確定永久刪除勾選的 ${ids.length} 筆紀錄？此操作無法復原`);
+    if (!confirmed) return;
+    btnLoading(actionBtn);
+    try {
+      for (const id of ids) await api(`/api/quests/deleted-recent/${id}`, { method: "DELETE" });
+      state.selectedDeletedIds = {};
+      setMessage(`已刪除 ${ids.length} 筆紀錄`);
+      state.deletedQuests = await api("/api/quests/deleted-recent");
+      renderDeletedQuests();
+      btnRestore(actionBtn);
+    } catch (err) { btnRestore(actionBtn); setMessage(err.message, true); }
+  });
+  $("#delete-all-deleted-btn")?.addEventListener("click", async (event) => {
+    const actionBtn = event.target.closest("button") || event.target;
+    const confirmed = await showConfirmModal("確定清除所有刪除紀錄嗎？此操作無法復原");
+    if (!confirmed) return;
+    btnLoading(actionBtn);
+    try {
+      const result = await api("/api/quests/deleted-recent/all", { method: "DELETE" });
+      state.selectedDeletedIds = {};
+      state.deletedQuests = [];
+      setMessage(result.message || "已清除全部紀錄");
+      renderDeletedQuests();
+      btnRestore(actionBtn);
+    } catch (err) { btnRestore(actionBtn); setMessage(err.message, true); }
+  });
+  // Template category change: hide/show due-days for daily/weekly
+  $("#t-category")?.addEventListener("change", () => {
+    const cat = $("#t-category").value;
+    const dueDaysField = $("#t-due-days-field");
+    if (dueDaysField) dueDaysField.classList.toggle("is-hidden", cat === "daily" || cat === "weekly");
+  });
+  // Fire once on load to set initial state
+  (function () {
+    const cat = $("#t-category")?.value;
+    const dueDaysField = $("#t-due-days-field");
+    if (dueDaysField && cat) dueDaysField.classList.toggle("is-hidden", cat === "daily" || cat === "weekly");
+  })();
   $("#g-user-id").value = DEFAULT_USER_ID;
   // Toggle event-time field visibility based on announcement type
   $("#ann-type").addEventListener("change", (e) => {
@@ -1682,9 +2795,34 @@ async function boot() {
   $("#giftbox-claim-all-btn").addEventListener("click", onGiftboxToolbarClick);
   $("#giftbox-read-all-btn").addEventListener("click", onGiftboxToolbarClick);
   $("#giftbox-delete-read-btn").addEventListener("click", onGiftboxToolbarClick);
+  $("#wish-form")?.addEventListener("submit", submitWish);
+  $("#wish-list")?.addEventListener("click", onWishListClick);
+  $("#event-schedule-form")?.addEventListener("submit", createEventSchedule);
+  $("#event-admin-nav")?.addEventListener("click", onEventAdminNavClick);
+  $("#event-schedule-list")?.addEventListener("click", onEventScheduleListClick);
+  $("#event-import-preview-list")?.addEventListener("click", onImportedEventPreviewClick);
+  $("#quest-xlsx-upload")?.addEventListener("change", onQuestXlsxUpload);
+  $("#event-xlsx-upload")?.addEventListener("change", onEventXlsxUpload);
+  $("#daily-journal-form")?.addEventListener("submit", saveDailyJournal);
+  $("#journal-date")?.addEventListener("change", async (event) => {
+    try {
+      await loadDailyJournalByDate(event.target.value || todayIso());
+    } catch (err) {
+      setMessage(err.message, true);
+    }
+  });
+
+  renderEventAdminNav();
+  applyEventAdminTabVisibility();
 
   // Lightbox: open on data-lightbox click, close on overlay or close button
   document.addEventListener("click", (event) => {
+    const adminTabBtn = event.target.closest("[data-admin-quest-tab]");
+    if (adminTabBtn) {
+      onAdminQuestNavClick(event);
+      return;
+    }
+
     const src =
       event.target.getAttribute("data-lightbox") ||
       event.target.closest("[data-lightbox]")?.getAttribute("data-lightbox");

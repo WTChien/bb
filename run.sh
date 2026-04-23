@@ -38,4 +38,4 @@ echo "[INFO] Installing dependencies..."
 .venv/bin/python -m pip install -r requirements.txt
 
 echo "[INFO] Starting server at http://127.0.0.1:8000"
-.venv/bin/python -m uvicorn app.main:app --reload
+.venv/bin/python -m uvicorn app.main:app --reload --lifespan off

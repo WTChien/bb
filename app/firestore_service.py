@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 import random
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from dataclasses import dataclass
 from typing import Any
@@ -28,6 +28,7 @@ class FirestoreQuestService:
         credential_path: str | None = None,
         credential_dict: dict | None = None,
     ) -> None:
+        self.project_root = Path(__file__).resolve().parents[1]
         resolved_credential_path: str | None = None
 
         # Priority 1: credential dict (from env var JSON string on Render)
@@ -57,30 +58,65 @@ class FirestoreQuestService:
         else:
             self.db = firestore.Client(project=project_id) if project_id else firestore.Client()
 
-    def get_quests(self) -> list[dict[str, Any]]:
+    def get_quests(self, include_future: bool = False) -> list[dict[str, Any]]:
         docs = (
             self.db.collection("quests")
             .where(filter=FieldFilter("is_active", "==", True))
             .stream()
         )
+        today = date.today().isoformat()
         quests = []
         for doc in docs:
             item = doc.to_dict()
+            published_date = str(item.get("published_date") or "")
+            if not include_future and published_date and published_date > today:
+                continue
             item["id"] = doc.id
             quests.append(item)
-        quests.sort(key=lambda q: q.get("points", 0))
+        # sort: sort_order desc (higher = shown first), then published_date desc
+        quests.sort(key=lambda q: str(q.get("published_date") or ""), reverse=True)
+        quests.sort(key=lambda q: int(q.get("sort_order") or 0), reverse=True)
         return quests
 
+    @staticmethod
+    def _compute_due_date(category: str, published_date: str, explicit_due: str) -> str:
+        """Return the appropriate due_date string.
+        - weekly quests: end of the current week (Sunday 23:59 → represented as that Sunday's date)
+        - daily quests: same as published_date (today)
+        - others: use explicit_due if given, else published_date
+        """
+        if category == "weekly":
+            today = date.today()
+            # weekday(): Monday=0, Sunday=6 → days until Sunday
+            days_to_sunday = (6 - today.weekday()) % 7
+            if days_to_sunday == 0:
+                days_to_sunday = 7  # if today IS Sunday, go to next Sunday
+            return (today + __import__("datetime").timedelta(days=days_to_sunday)).isoformat()
+        if explicit_due:
+            return explicit_due
+        if category == "daily":
+            return published_date
+        return published_date
+
     def create_quest(self, payload: dict[str, Any]) -> dict[str, Any]:
-        published_date = payload.get("published_date") or date.today().isoformat()
-        due_date = payload.get("due_date") or published_date
+        category = payload.get("category", "other")
+        raw_published = str(payload.get("published_date") or "").strip()
+        if raw_published:
+            published_date = raw_published
+        elif category in ("event", "other"):
+            published_date = ""
+        else:
+            published_date = date.today().isoformat()
+        due_date = self._compute_due_date(category, published_date, payload.get("due_date") or "")
         data = {
             "title": payload["title"],
             "description": payload["description"],
             "points": payload["points"],
             "difficulty": payload.get("difficulty", "easy"),
+            "category": category,
             "published_date": published_date,
             "due_date": due_date,
+            "sort_order": int(payload.get("sort_order") or 0),
             "is_active": True,
             "created_at": SERVER_TIMESTAMP,
             "updated_at": SERVER_TIMESTAMP,
@@ -96,14 +132,22 @@ class FirestoreQuestService:
         if not snapshot.exists:
             return {"ok": False, "message": "任務不存在"}
 
-        published_date = payload.get("published_date") or date.today().isoformat()
-        due_date = payload.get("due_date") or published_date
+        category = payload.get("category", "other")
+        raw_published = str(payload.get("published_date") or "").strip()
+        if raw_published:
+            published_date = raw_published
+        elif category in ("event", "other"):
+            published_date = ""
+        else:
+            published_date = date.today().isoformat()
+        due_date = self._compute_due_date(category, published_date, payload.get("due_date") or "")
         ref.set(
             {
                 "title": payload["title"],
                 "description": payload["description"],
                 "points": payload["points"],
                 "difficulty": payload.get("difficulty", "easy"),
+                "category": category,
                 "published_date": published_date,
                 "due_date": due_date,
                 "updated_at": SERVER_TIMESTAMP,
@@ -111,6 +155,13 @@ class FirestoreQuestService:
             merge=True,
         )
         return {"ok": True, "message": "任務更新成功", "id": quest_id}
+
+    def set_quest_sort_order(self, quest_id: str, sort_order: int) -> dict[str, Any]:
+        ref = self.db.collection("quests").document(quest_id)
+        if not ref.get().exists:
+            return {"ok": False, "message": "任務不存在"}
+        ref.set({"sort_order": sort_order, "updated_at": SERVER_TIMESTAMP}, merge=True)
+        return {"ok": True, "message": "排序已更新"}
 
     def deactivate_quest(self, quest_id: str) -> dict[str, Any]:
         ref = self.db.collection("quests").document(quest_id)
@@ -163,6 +214,34 @@ class FirestoreQuestService:
             items.append(item)
         items.sort(key=lambda d: str(d.get("deleted_at", "")), reverse=True)
         return items[:50]
+
+    def restore_deleted_quest(self, log_id: str) -> dict[str, Any]:
+        log_ref = self.db.collection("deleted_quests_log").document(log_id)
+        log_snap = log_ref.get()
+        if not log_snap.exists:
+            return {"ok": False, "message": "刪除紀錄不存在"}
+        log_data = log_snap.to_dict() or {}
+        quest_id = log_data.get("quest_id", "")
+        if quest_id:
+            quest_ref = self.db.collection("quests").document(quest_id)
+            quest_snap = quest_ref.get()
+            if quest_snap.exists:
+                quest_ref.set({"is_active": True, "updated_at": SERVER_TIMESTAMP}, merge=True)
+        log_ref.delete()
+        return {"ok": True, "message": "任務已回復"}
+
+    def permanently_delete_deleted_quest(self, log_id: str) -> dict[str, Any]:
+        log_ref = self.db.collection("deleted_quests_log").document(log_id)
+        if not log_ref.get().exists:
+            return {"ok": False, "message": "刪除紀錄不存在"}
+        log_ref.delete()
+        return {"ok": True, "message": "已永久刪除"}
+
+    def permanently_delete_all_deleted_quests(self) -> dict[str, Any]:
+        docs = list(self.db.collection("deleted_quests_log").stream())
+        for doc in docs:
+            doc.reference.delete()
+        return {"ok": True, "message": f"已清除 {len(docs)} 筆刪除紀錄", "count": len(docs)}
 
     def get_quest_templates(self) -> list[dict[str, Any]]:
         docs = (
@@ -258,16 +337,16 @@ class FirestoreQuestService:
         snap = ref.get()
         data = snap.to_dict() if snap.exists else {}
         return {
-            "daily_count": int(data.get("daily_count", 3)),
-            "weekly_count": int(data.get("weekly_count", 2)),
+            "daily_count": int(data.get("daily_count", 5)),
+            "weekly_count": int(data.get("weekly_count", 10)),
         }
 
     def update_quest_refresh_settings(self, payload: dict[str, Any]) -> dict[str, Any]:
         ref = self.db.collection("meta").document("quest_refresh_settings")
         ref.set(
             {
-                "daily_count": int(payload.get("daily_count", 3)),
-                "weekly_count": int(payload.get("weekly_count", 2)),
+                "daily_count": int(payload.get("daily_count", 5)),
+                "weekly_count": int(payload.get("weekly_count", 10)),
                 "updated_at": SERVER_TIMESTAMP,
             },
             merge=True,
@@ -276,8 +355,8 @@ class FirestoreQuestService:
 
     def refresh_quests_from_templates(self) -> dict[str, Any]:
         settings = self.get_quest_refresh_settings()
-        daily_count = int(settings.get("daily_count", 3))
-        weekly_count = int(settings.get("weekly_count", 2))
+        daily_count = int(settings.get("daily_count", 5))
+        weekly_count = int(settings.get("weekly_count", 10))
 
         templates = self.get_quest_templates()
         daily = [t for t in templates if str(t.get("category", "")) == "daily"]
@@ -303,6 +382,24 @@ class FirestoreQuestService:
             return {"ok": False, "message": "獎勵不存在"}
         ref.set({"is_active": False}, merge=True)
         return {"ok": True, "message": "獎勵已刪除", "id": reward_id}
+
+    def update_reward(self, reward_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        ref = self.db.collection("rewards").document(reward_id)
+        snapshot = ref.get()
+        if not snapshot.exists:
+            return {"ok": False, "message": "獎勵不存在"}
+
+        ref.set(
+            {
+                "title": payload["title"],
+                "description": payload["description"],
+                "cost_points": int(payload["cost_points"]),
+                "image_path": payload.get("image_path", ""),
+                "updated_at": SERVER_TIMESTAMP,
+            },
+            merge=True,
+        )
+        return {"ok": True, "message": "獎勵更新成功", "id": reward_id}
 
     def get_announcements(self) -> list[dict[str, Any]]:
         docs = (
@@ -424,6 +521,234 @@ class FirestoreQuestService:
 
     def _stats_ref(self, user_id: str):
         return self.db.collection("users").document(user_id).collection("meta").document("stats")
+
+    def _extract_iso_date(self, value: Any) -> str:
+        if isinstance(value, datetime):
+            return value.date().isoformat()
+        if hasattr(value, "date") and callable(getattr(value, "date", None)):
+            try:
+                return value.date().isoformat()
+            except Exception:
+                return ""
+        if isinstance(value, str) and len(value) >= 10:
+            return value[:10]
+        return ""
+
+    def _completed_quest_doc_to_item(self, doc, fallback_date: str = "") -> dict[str, Any]:
+        data = doc.to_dict() or {}
+        completed_date = self._extract_iso_date(data.get("completed_at")) or fallback_date
+        return {
+            "quest_id": doc.id,
+            "title": str(data.get("title", "")),
+            "points_awarded": int(data.get("points_awarded", 0)),
+            "completed_date": completed_date,
+        }
+
+    def get_completed_quests_by_date(self, user_id: str, log_date: str) -> list[dict[str, Any]]:
+        docs = (
+            self.db.collection("users")
+            .document(user_id)
+            .collection("completed_quests")
+            .stream()
+        )
+        items: list[dict[str, Any]] = []
+        for doc in docs:
+            item = self._completed_quest_doc_to_item(doc)
+            if item.get("completed_date") == log_date:
+                items.append(item)
+        items.sort(key=lambda x: str(x.get("title", "")))
+        return items
+
+    def get_daily_journal(self, user_id: str, log_date: str) -> dict[str, Any]:
+        ref = (
+            self.db.collection("users")
+            .document(user_id)
+            .collection("daily_logs")
+            .document(log_date)
+        )
+        snapshot = ref.get()
+        if not snapshot.exists:
+            return {
+                "log_date": log_date,
+                "visited_place": "",
+                "note": "",
+                "completed_quests": [],
+                "completed_quest_ids": [],
+            }
+
+        data = snapshot.to_dict() or {}
+        completed_quests = data.get("completed_quests", [])
+        completed_ids = [str(item.get("quest_id", "")) for item in completed_quests if item.get("quest_id")]
+        return {
+            "log_date": str(data.get("log_date", log_date)),
+            "visited_place": str(data.get("visited_place", "")),
+            "note": str(data.get("note", "")),
+            "completed_quests": completed_quests,
+            "completed_quest_ids": completed_ids,
+        }
+
+    def upsert_daily_journal(self, user_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        log_date = str(payload.get("log_date", "")).strip()
+        if not log_date:
+            return {"ok": False, "message": "日期不可為空"}
+
+        selected_ids = [str(qid) for qid in payload.get("completed_quest_ids", []) if str(qid).strip()]
+        selected_set = set(selected_ids)
+
+        completed_docs = (
+            self.db.collection("users")
+            .document(user_id)
+            .collection("completed_quests")
+            .stream()
+        )
+
+        completed_quests: list[dict[str, Any]] = []
+        for doc in completed_docs:
+            if selected_set and doc.id not in selected_set:
+                continue
+            item = self._completed_quest_doc_to_item(doc, fallback_date=log_date)
+            if item.get("completed_date") != log_date:
+                continue
+            completed_quests.append(item)
+
+        completed_quests.sort(key=lambda x: str(x.get("title", "")))
+
+        ref = (
+            self.db.collection("users")
+            .document(user_id)
+            .collection("daily_logs")
+            .document(log_date)
+        )
+        ref.set(
+            {
+                "log_date": log_date,
+                "visited_place": str(payload.get("visited_place", "")).strip(),
+                "note": str(payload.get("note", "")).strip(),
+                "completed_quests": completed_quests,
+                "updated_at": SERVER_TIMESTAMP,
+                "created_at": SERVER_TIMESTAMP,
+            },
+            merge=True,
+        )
+
+        return {
+            "ok": True,
+            "message": "每日日誌已儲存",
+            "log_date": log_date,
+            "visited_place": str(payload.get("visited_place", "")).strip(),
+            "note": str(payload.get("note", "")).strip(),
+            "completed_quests": completed_quests,
+            "completed_quest_ids": [item.get("quest_id", "") for item in completed_quests],
+        }
+
+    # ── Event Schedules ──────────────────────────────────────────────────
+
+    def get_event_schedules(self) -> list[dict[str, Any]]:
+        docs = (
+            self.db.collection("event_schedules")
+            .where(filter=FieldFilter("is_active", "==", True))
+            .stream()
+        )
+        items: list[dict[str, Any]] = []
+        for doc in docs:
+            item = doc.to_dict() or {}
+            item["id"] = doc.id
+            items.append(item)
+        items.sort(key=lambda e: str(e.get("start_date", "")), reverse=True)
+        return items
+
+    def create_event_schedule(self, payload: dict[str, Any]) -> dict[str, Any]:
+        data: dict[str, Any] = {
+            "title": payload["title"],
+            "description": payload.get("description", ""),
+            "start_date": payload["start_date"],
+            "end_date": payload["end_date"],
+            "point_multiplier": float(payload.get("point_multiplier", 1.0)),
+            "announcement_title": payload.get("announcement_title", ""),
+            "announcement_content": payload.get("announcement_content", ""),
+            "announcement_event_time": payload.get("announcement_event_time", ""),
+            "auto_announce": bool(payload.get("auto_announce", True)),
+            "is_active": True,
+            "created_at": SERVER_TIMESTAMP,
+            "updated_at": SERVER_TIMESTAMP,
+        }
+        ref = self.db.collection("event_schedules").document()
+        ref.set(data)
+
+        ann_id: str | None = None
+        if payload.get("auto_announce", True) and payload.get("announcement_title", "").strip():
+            ann_ref = self.db.collection("announcements").document()
+            event_time = (
+                payload.get("announcement_event_time", "").strip()
+                or f"{payload['start_date']} ～ {payload['end_date']}"
+            )
+            ann_ref.set({
+                "title": payload["announcement_title"],
+                "content": payload.get("announcement_content", "") or payload.get("description", ""),
+                "ann_type": "event",
+                "event_time": event_time,
+                "is_active": True,
+                "created_at": SERVER_TIMESTAMP,
+            })
+            ann_id = ann_ref.id
+
+        return {
+            "ok": True,
+            "message": "活動排程已建立" + ("，公告已推播" if ann_id else ""),
+            "id": ref.id,
+            "announcement_id": ann_id,
+        }
+
+    def delete_event_schedule(self, event_id: str) -> dict[str, Any]:
+        ref = self.db.collection("event_schedules").document(event_id)
+        if not ref.get().exists:
+            return {"ok": False, "message": "活動不存在"}
+        ref.set({"is_active": False, "updated_at": SERVER_TIMESTAMP}, merge=True)
+        return {"ok": True, "message": "活動排程已刪除"}
+
+    # ── Wish Pool ──────────────────────────────────────────────
+
+    def get_wishes(self, user_id: str | None = None) -> list[dict[str, Any]]:
+        """Return wishes. If user_id given, return only that user's wishes; else all active."""
+        query = self.db.collection("wishes").where(filter=FieldFilter("is_active", "==", True))
+        if user_id:
+            query = query.where(filter=FieldFilter("user_id", "==", user_id))
+        docs = query.stream()
+        items: list[dict[str, Any]] = []
+        for doc in docs:
+            item = doc.to_dict() or {}
+            item["id"] = doc.id
+            items.append(item)
+        items.sort(key=lambda w: str(w.get("created_at", "")), reverse=True)
+        return items
+
+    def create_wish(self, user_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        data: dict[str, Any] = {
+            "user_id": user_id,
+            "url": payload["url"],
+            "item_name": payload.get("item_name", "").strip(),
+            "note": payload.get("note", "").strip(),
+            "is_fulfilled": False,
+            "is_active": True,
+            "created_at": SERVER_TIMESTAMP,
+        }
+        ref = self.db.collection("wishes").document()
+        ref.set(data)
+        return {"ok": True, "message": "許願成功！🌠", "id": ref.id}
+
+    def fulfill_wish(self, wish_id: str) -> dict[str, Any]:
+        ref = self.db.collection("wishes").document(wish_id)
+        if not ref.get().exists:
+            return {"ok": False, "message": "許願不存在"}
+        ref.set({"is_fulfilled": True, "updated_at": SERVER_TIMESTAMP}, merge=True)
+        return {"ok": True, "message": "已標記為已達成 ✨"}
+
+    def delete_wish(self, wish_id: str) -> dict[str, Any]:
+        ref = self.db.collection("wishes").document(wish_id)
+        if not ref.get().exists:
+            return {"ok": False, "message": "許願不存在"}
+        ref.set({"is_active": False, "updated_at": SERVER_TIMESTAMP}, merge=True)
+        return {"ok": True, "message": "許願已刪除"}
 
     def get_progress(self, user_id: str) -> dict[str, Any]:
         stats_snapshot = self._stats_ref(user_id).get()
@@ -638,6 +963,12 @@ class FirestoreQuestService:
         submissions = []
         for doc in docs:
             item = doc.to_dict()
+            proof_path = str(item.get("proof_image_path", ""))
+            if proof_path.startswith("/img/"):
+                local_rel = proof_path.removeprefix("/")
+                local_path = self.project_root / local_rel.replace("/", os.sep)
+                if not local_path.exists():
+                    item["proof_image_path"] = ""
             item["id"] = doc.id
             submissions.append(item)
 
