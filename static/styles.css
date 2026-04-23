@@ -966,6 +966,14 @@ textarea{resize:vertical;min-height:64px}
   animation: gacha-float 2.7s ease-in-out infinite;
 }
 
+.gacha-chest-img {
+  width: 120px;
+  max-width: 92%;
+  height: auto;
+  object-fit: contain;
+  filter: drop-shadow(0 8px 16px rgba(0, 0, 0, .45));
+}
+
 .gacha-card-head {
   display: flex;
   justify-content: space-between;
@@ -974,6 +982,15 @@ textarea{resize:vertical;min-height:64px}
 }
 
 .gacha-card .muted { color: rgba(236, 248, 255, .9); }
+
+.gacha-cost-pill {
+  background: linear-gradient(180deg, #fff7d1 0%, #ffe289 100%);
+  color: #1f2a36;
+  border-color: #f0ba2d;
+  text-shadow: none;
+  box-shadow: 0 0 0 1px rgba(32, 44, 58, .18) inset;
+  font-weight: 900;
+}
 
 .gacha-card.is-opening {
   animation: gacha-open-pulse .18s ease-in-out 0s 6 alternate;

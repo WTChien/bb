@@ -39,7 +39,8 @@
   activeAdminQuestTab: "list",
   activeEventAdminTab: "create",
   activeMallTab: "shop",
-  gachaPity: { bronze: 0, silver: 0, gold: 0, pity_limit: 10 },
+  gachaPity: { bronze: 0, silver: 0, gold: 0 },
+  gachaPityLimits: { bronze: 10, silver: 20, gold: 30 },
   gachaOverview: {},
   eventSchedules: [],
   importedEventQuests: [],
@@ -59,34 +60,37 @@ const GACHA_CHESTS = {
   bronze: {
     label: "銅寶箱",
     icon: "🥉",
+    image: "/img/bronze_chest_nobg.png",
     cost: 200,
     pool: [
-      { rank: "SSS", points: 1440, rate: 1 },
-      { rank: "S", points: 250, rate: 10 },
-      { rank: "A", points: 100, rate: 39 },
-      { rank: "B", points: 40, rate: 50 },
+      { rank: "SSS", points: 1500, rate: 5 },
+      { rank: "S", points: 120, rate: 15 },
+      { rank: "A", points: 40, rate: 30 },
+      { rank: "B", points: 10, rate: 50 },
     ],
   },
   silver: {
     label: "銀寶箱",
     icon: "🥈",
+    image: "/img/silver_chest_nobg.png",
     cost: 500,
     pool: [
-      { rank: "SSS", points: 3600, rate: 2 },
-      { rank: "S", points: 600, rate: 15 },
-      { rank: "A", points: 250, rate: 33 },
-      { rank: "B", points: 100, rate: 50 },
+      { rank: "SSS", points: 5000, rate: 3 },
+      { rank: "S", points: 350, rate: 12 },
+      { rank: "A", points: 120, rate: 25 },
+      { rank: "B", points: 20, rate: 60 },
     ],
   },
   gold: {
     label: "金寶箱",
     icon: "🥇",
+    image: "/img/gold_chest_nobg.png",
     cost: 1000,
     pool: [
-      { rank: "SSS", points: 7200, rate: 3 },
-      { rank: "S", points: 1500, rate: 20 },
-      { rank: "A", points: 600, rate: 37 },
-      { rank: "B", points: 200, rate: 40 },
+      { rank: "SSS", points: 12000, rate: 1 },
+      { rank: "S", points: 900, rate: 9 },
+      { rank: "A", points: 250, rate: 20 },
+      { rank: "B", points: 30, rate: 70 },
     ],
   },
 };
@@ -1318,6 +1322,8 @@ function getGachaChestViewData(chestKey) {
   return {
     ...base,
     cost: Number.isFinite(Number(overviewChest.cost)) ? Number(overviewChest.cost) : base.cost,
+    totalItems: Number(overviewChest.total_items || 0),
+    remainingItems: Number(overviewChest.remaining_items || 0),
     configuredRtp: Number(overviewChest.configured_rtp_percent || 0),
     configuredHouseEdge: Number(overviewChest.configured_house_edge_percent || 0),
     inventoryRtp: Number(overviewChest.inventory_rtp_percent || 0),
@@ -1328,53 +1334,41 @@ function getGachaChestViewData(chestKey) {
 
 function renderGachaBoard() {
   const list = $("#gacha-list");
-  const summaryEl = $("#gacha-rtp-summary");
   if (!list) return;
   list.innerHTML = "";
 
-  const pityLimit = Number(state.gachaPity?.pity_limit || 10);
   Object.keys(GACHA_CHESTS).forEach((key) => {
     const chest = getGachaChestViewData(key);
     if (!chest) return;
     const pity = Number(state.gachaPity?.[key] || 0);
+    const pityLimit = Number(state.gachaPityLimits?.[key] || 10);
     const remain = Math.max(0, pityLimit - pity);
-    const chestImg = key === "gold" ? "🪙" : key === "silver" ? "🧊" : "📦";
+    const chestImg = chest.image || "";
     const card = document.createElement("article");
     card.className = `gacha-card gacha-${key}`;
     card.setAttribute("data-gacha-card", key);
     card.innerHTML = `
-      <div class="gacha-card-visual">${chestImg}</div>
+      <div class="gacha-card-visual">${chestImg ? `<img src="${chestImg}" alt="${chest.label}" class="gacha-chest-img" />` : chest.icon}</div>
       <div class="gacha-card-head">
         <strong>${chest.icon} ${chest.label}</strong>
-        <span class="pill">${chest.cost} 點</span>
+        <span class="pill gacha-cost-pill">${chest.cost} 點</span>
       </div>
-      <div class="muted">保底進度：${pity}/${pityLimit}（剩餘 ${remain} 抽）</div>
-      <div class="muted">目前庫存池估算：回收率 ${chest.inventoryRtp.toFixed(2)}%（玩家平均淨損 ${chest.inventoryHouseEdge.toFixed(2)}%）</div>
+      <div class="muted">保底進度：${pity}/${pityLimit}（保底剩餘 ${remain} 抽）</div>
       <div class="review-actions">
         <button class="btn-wood btn-sm" type="button" data-gacha-prob="${key}">查看機率</button>
         <button class="btn-wood btn-sm btn-accent" type="button" data-gacha-draw="${key}">開箱抽獎</button>
+        <button class="btn-wood btn-sm btn-ghost" type="button" data-gacha-reset="${key}">重製保底</button>
       </div>
     `;
     list.appendChild(card);
   });
-
-  if (summaryEl) {
-    const values = Object.keys(GACHA_CHESTS)
-      .map((k) => getGachaChestViewData(k))
-      .filter(Boolean);
-    if (!values.length) {
-      summaryEl.textContent = "";
-      return;
-    }
-    const avgHouseEdge = values.reduce((sum, x) => sum + Number(x.inventoryHouseEdge || 0), 0) / values.length;
-    summaryEl.textContent = `目前三種寶箱平均淨損約 ${avgHouseEdge.toFixed(2)}%。若目標是抽滿平均輸 10%，需要再調整機率或獎項點數。`;
-  }
 }
 
 async function onGachaListClick(event) {
   const probType = event.target.getAttribute("data-gacha-prob");
   const drawType = event.target.getAttribute("data-gacha-draw");
-  if (!probType && !drawType) return;
+  const resetType = event.target.getAttribute("data-gacha-reset");
+  if (!probType && !drawType && !resetType) return;
 
   if (probType) {
     const chest = getGachaChestViewData(probType);
@@ -1387,9 +1381,45 @@ async function onGachaListClick(event) {
       .join("");
     openGachaModal(
       `${chest.label} 機率表`,
-      `<div class="muted" style="margin-bottom:8px">理論回收率 ${chest.configuredRtp.toFixed(2)}% ｜ 理論淨損 ${chest.configuredHouseEdge.toFixed(2)}%</div>
-       <table class="gacha-prob-table"><thead><tr><th>等級</th><th>點數</th><th>機率</th><th>剩餘數量</th></tr></thead><tbody>${rows}</tbody></table>`
+      `<div class="muted" style="margin-bottom:8px">註：每輪固定內容物數量為 銅20／銀100／金100；「剩餘數量」顯示的是該箱本輪獎池剩餘。</div><table class="gacha-prob-table"><thead><tr><th>等級</th><th>點數</th><th>機率</th><th>剩餘數量</th></tr></thead><tbody>${rows}</tbody></table>`
     );
+    return;
+  }
+
+  if (resetType) {
+    const ok = window.confirm("確定重製這個寶箱的保底次數嗎？");
+    if (!ok) return;
+    const btn = event.target.closest("button") || event.target;
+    btnLoading(btn);
+    try {
+      const result = await api(`/api/gacha/pity/reset/${encodeURIComponent(state.userId)}`, {
+        method: "POST",
+        body: JSON.stringify({ chest_type: resetType }),
+      });
+      state.gachaPity = {
+        ...state.gachaPity,
+        [resetType]: Number(result.pity_after || 0),
+      };
+      if (result.inventory && state.gachaOverview?.[resetType]) {
+        const updatedPool = (state.gachaOverview[resetType].pool || []).map((item) => ({
+          ...item,
+          remaining: Number(result.inventory[String(item.rank || "")] ?? item.remaining ?? 0),
+        }));
+        const totalItems = updatedPool.reduce((sum, item) => sum + Number(item.remaining || 0), 0);
+        state.gachaOverview[resetType] = {
+          ...state.gachaOverview[resetType],
+          pool: updatedPool,
+          remaining_items: totalItems,
+          total_items: totalItems,
+        };
+      }
+      renderGachaBoard();
+      setMessage(`${getGachaChestViewData(resetType)?.label || "寶箱"}保底與本輪獎池已重製`);
+    } catch (err) {
+      setMessage(err.message, true);
+    } finally {
+      btnRestore(btn);
+    }
     return;
   }
 
@@ -1410,6 +1440,10 @@ async function onGachaListClick(event) {
         ...state.gachaPity,
         [drawType]: Number(result.pity_after || 0),
       };
+      state.gachaPityLimits = {
+        ...state.gachaPityLimits,
+        [drawType]: Number(result.pity_limit || state.gachaPityLimits?.[drawType] || 10),
+      };
       if (result.inventory && state.gachaOverview?.[drawType]) {
         const updatedPool = (state.gachaOverview[drawType].pool || []).map((item) => ({
           ...item,
@@ -1427,7 +1461,7 @@ async function onGachaListClick(event) {
       const guaranteedHtml = result.guaranteed ? '<div class="gacha-result-guaranteed">保底觸發！</div>' : "";
       openGachaModal(
         `${GACHA_CHESTS[drawType]?.label || "寶箱"} 抽獎結果`,
-        `<div class="gacha-result-wrap"><div class="gacha-result-rank">${reward.rank}</div><div class="gacha-result-points">獲得 ${reward.points} 點</div>${guaranteedHtml}<div class="muted">目前保底：${result.pity_after || 0}/${state.gachaPity.pity_limit || 10}</div><div class="muted">本次後該箱剩餘獎池已更新</div></div>`
+        `<div class="gacha-result-wrap"><div class="gacha-result-rank">${reward.rank}</div><div class="gacha-result-points">獲得 ${reward.points} 點</div>${guaranteedHtml}<div class="muted">目前保底：${result.pity_after || 0}/${state.gachaPityLimits?.[drawType] || result.pity_limit || 10}</div><div class="muted">本次後該箱剩餘獎池已更新</div></div>`
       );
       setMessage(`抽獎成功！獲得 ${reward.rank}（+${reward.points} 點）`);
     } catch (err) {
@@ -1759,7 +1793,11 @@ async function refreshAll() {
       bronze: Number(gachaOverview?.pity?.bronze || 0),
       silver: Number(gachaOverview?.pity?.silver || 0),
       gold: Number(gachaOverview?.pity?.gold || 0),
-      pity_limit: Number(gachaOverview?.pity_limit || 10),
+    };
+    state.gachaPityLimits = {
+      bronze: Number(gachaOverview?.pity_limits?.bronze || 10),
+      silver: Number(gachaOverview?.pity_limits?.silver || 20),
+      gold: Number(gachaOverview?.pity_limits?.gold || 30),
     };
     state.gachaOverview = gachaOverview?.chests || {};
 

@@ -27,40 +27,46 @@ class ActionResult:
     points: int
 
 
-GACHA_PITY_LIMIT = 10
+GACHA_PITY_LIMITS: dict[str, int] = {
+    "bronze": 10,
+    "silver": 20,
+    "gold": 30,
+}
 GACHA_CHEST_CONFIG: dict[str, dict[str, Any]] = {
     "bronze": {
         "cost": 200,
         "pool": [
-            {"rank": "SSS", "points": 1440, "rate": 0.01},
-            {"rank": "S", "points": 250, "rate": 0.10},
-            {"rank": "A", "points": 100, "rate": 0.39},
-            {"rank": "B", "points": 40, "rate": 0.50},
+            {"rank": "SSS", "points": 1500, "rate": 0.05},
+            {"rank": "S", "points": 120, "rate": 0.15},
+            {"rank": "A", "points": 40, "rate": 0.30},
+            {"rank": "B", "points": 10, "rate": 0.50},
         ],
     },
     "silver": {
         "cost": 500,
         "pool": [
-            {"rank": "SSS", "points": 3600, "rate": 0.02},
-            {"rank": "S", "points": 600, "rate": 0.15},
-            {"rank": "A", "points": 250, "rate": 0.33},
-            {"rank": "B", "points": 100, "rate": 0.50},
+            {"rank": "SSS", "points": 5000, "rate": 0.03},
+            {"rank": "S", "points": 350, "rate": 0.12},
+            {"rank": "A", "points": 120, "rate": 0.25},
+            {"rank": "B", "points": 20, "rate": 0.60},
         ],
     },
     "gold": {
         "cost": 1000,
         "pool": [
-            {"rank": "SSS", "points": 7200, "rate": 0.03},
-            {"rank": "S", "points": 1500, "rate": 0.20},
-            {"rank": "A", "points": 600, "rate": 0.37},
-            {"rank": "B", "points": 200, "rate": 0.40},
+            {"rank": "SSS", "points": 12000, "rate": 0.01},
+            {"rank": "S", "points": 900, "rate": 0.09},
+            {"rank": "A", "points": 250, "rate": 0.20},
+            {"rank": "B", "points": 30, "rate": 0.70},
         ],
     },
 }
 GACHA_INVENTORY_DEFAULT: dict[str, dict[str, int]] = {
-    "bronze": {"SSS": 150, "S": 600, "A": 2000, "B": 3000},
-    "silver": {"SSS": 150, "S": 700, "A": 1900, "B": 2800},
-    "gold": {"SSS": 180, "S": 850, "A": 1700, "B": 2400},
+    # Round totals tuned to match target rates exactly:
+    # bronze 20 draws (5%), silver 100 draws (3%), gold 100 draws (1%).
+    "bronze": {"SSS": 1, "S": 3, "A": 6, "B": 10},
+    "silver": {"SSS": 3, "S": 12, "A": 25, "B": 60},
+    "gold": {"SSS": 1, "S": 9, "A": 20, "B": 70},
 }
 
 
@@ -584,7 +590,8 @@ class FirestoreQuestService:
                 base = int(GACHA_INVENTORY_DEFAULT.get(chest_key, {}).get(rank, 0))
                 value = src.get(rank, base)
                 try:
-                    normalized[chest_key][rank] = max(0, int(value))
+                    # Clamp to configured round size so old oversized inventories are auto-corrected.
+                    normalized[chest_key][rank] = max(0, min(base, int(value)))
                 except Exception:
                     normalized[chest_key][rank] = max(0, base)
         return normalized
@@ -632,7 +639,36 @@ class FirestoreQuestService:
             "bronze": int(data.get("bronze", 0)),
             "silver": int(data.get("silver", 0)),
             "gold": int(data.get("gold", 0)),
-            "pity_limit": GACHA_PITY_LIMIT,
+            "pity_limits": GACHA_PITY_LIMITS,
+            # Keep compatibility field for older clients.
+            "pity_limit": int(GACHA_PITY_LIMITS.get("bronze", 10)),
+        }
+
+    def reset_gacha_pity(self, user_id: str, chest_type: str) -> dict[str, Any]:
+        if chest_type not in GACHA_CHEST_CONFIG:
+            return {"ok": False, "message": "寶箱類型無效"}
+
+        chest_inventory = dict(GACHA_INVENTORY_DEFAULT.get(chest_type, {}))
+        self._gacha_state_ref(user_id).set(
+            {
+                chest_type: 0,
+                "updated_at": SERVER_TIMESTAMP,
+            },
+            merge=True,
+        )
+        self._gacha_inventory_ref().set(
+            {
+                chest_type: chest_inventory,
+                "updated_at": SERVER_TIMESTAMP,
+            },
+            merge=True,
+        )
+        return {
+            "ok": True,
+            "message": "保底與本輪獎池已重製",
+            "chest_type": chest_type,
+            "pity_after": 0,
+            "inventory": chest_inventory,
         }
 
     def get_gacha_overview(self, user_id: str) -> dict[str, Any]:
@@ -656,9 +692,13 @@ class FirestoreQuestService:
 
             configured_rtp = self._calc_rtp_percent(chest)
             inventory_rtp = self._calc_inventory_rtp_percent(chest, chest_inventory)
+            total_items = sum(int(v) for v in GACHA_INVENTORY_DEFAULT.get(chest_key, {}).values())
+            remaining_items = sum(int(v) for v in chest_inventory.values())
             chests[chest_key] = {
                 "cost": int(chest.get("cost", 0)),
                 "pool": pool_out,
+                "total_items": int(total_items),
+                "remaining_items": int(remaining_items),
                 "configured_rtp_percent": configured_rtp,
                 "configured_house_edge_percent": round(100.0 - configured_rtp, 2),
                 "inventory_rtp_percent": inventory_rtp,
@@ -667,7 +707,9 @@ class FirestoreQuestService:
 
         return {
             "pity": pity,
-            "pity_limit": GACHA_PITY_LIMIT,
+            "pity_limits": GACHA_PITY_LIMITS,
+            # Keep compatibility field for older clients.
+            "pity_limit": int(GACHA_PITY_LIMITS.get("bronze", 10)),
             "chests": chests,
         }
 
@@ -704,18 +746,27 @@ class FirestoreQuestService:
 
             current_pity = int(gacha_state.get(chest_type, 0))
             next_count = current_pity + 1
+            pity_limit = int(GACHA_PITY_LIMITS.get(chest_type, 10))
 
-            guaranteed = next_count >= GACHA_PITY_LIMIT
+            guaranteed = next_count >= pity_limit
             available_pool = [
                 item for item in chest["pool"]
                 if int(chest_inventory.get(str(item.get("rank", "")), 0)) > 0
             ]
             if not available_pool:
-                return {
-                    "ok": False,
-                    "message": f"{chest_type} 寶箱已抽完，請稍後補貨",
-                    "points": current_points,
-                }
+                # Start a new inventory round automatically when this chest is exhausted.
+                chest_inventory = dict(GACHA_INVENTORY_DEFAULT.get(chest_type, {}))
+                inventory[chest_type] = chest_inventory
+                available_pool = [
+                    item for item in chest["pool"]
+                    if int(chest_inventory.get(str(item.get("rank", "")), 0)) > 0
+                ]
+                if not available_pool:
+                    return {
+                        "ok": False,
+                        "message": f"{chest_type} 寶箱暫時不可用",
+                        "points": current_points,
+                    }
 
             if guaranteed and int(chest_inventory.get("SSS", 0)) > 0:
                 reward = next((x for x in chest["pool"] if str(x.get("rank", "")) == "SSS"), available_pool[0])
@@ -766,6 +817,7 @@ class FirestoreQuestService:
                     "points": int(reward.get("points", 0)),
                 },
                 "guaranteed": bool(guaranteed),
+                "pity_limit": pity_limit,
                 "pity_before": current_pity,
                 "pity_after": next_pity,
                 "points": new_points,

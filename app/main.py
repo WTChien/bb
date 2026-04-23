@@ -139,6 +139,10 @@ class GachaDrawRequest(BaseModel):
     chest_type: str = Field(pattern="^(bronze|silver|gold)$")
 
 
+class GachaPityResetRequest(BaseModel):
+    chest_type: str = Field(pattern="^(bronze|silver|gold)$")
+
+
 load_dotenv()
 project_root = Path(__file__).resolve().parents[1]
 
@@ -409,6 +413,14 @@ def draw_gacha(user_id: str, payload: GachaDrawRequest) -> dict:
     result = service.draw_gacha(user_id=user_id, chest_type=payload.chest_type)
     if not result.get("ok"):
         raise HTTPException(status_code=400, detail={"message": result.get("message", "抽獎失敗")})
+    return result
+
+
+@app.post("/api/gacha/pity/reset/{user_id}")
+def reset_gacha_pity(user_id: str, payload: GachaPityResetRequest) -> dict:
+    result = service.reset_gacha_pity(user_id=user_id, chest_type=payload.chest_type)
+    if not result.get("ok"):
+        raise HTTPException(status_code=400, detail={"message": result.get("message", "重製保底失敗")})
     return result
 
 
