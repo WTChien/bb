@@ -58,6 +58,69 @@ let globalLoadingCount = 0;
 const $ = (selector) => document.querySelector(selector);
 
 function todayIso() {
+// ─── Point-multiplier banner ──────────────────────────────────────────────────
+let _multiplierTimerHandle = null;
+
+function getActiveMultiplierEvents() {
+  const today = todayIso();
+  return (state.eventSchedules || []).filter((ev) => {
+    const m = parseFloat(ev.point_multiplier || 1);
+    if (m <= 1) return false;
+    return (!ev.start_date || ev.start_date <= today) &&
+           (!ev.end_date   || ev.end_date   >= today);
+  });
+}
+
+function renderMultiplierBanner() {
+  const banner = $("#point-multiplier-banner");
+  if (!banner) return;
+  if (_multiplierTimerHandle) { clearInterval(_multiplierTimerHandle); _multiplierTimerHandle = null; }
+
+  const events = getActiveMultiplierEvents();
+  if (!events.length) { banner.innerHTML = ""; return; }
+
+  function buildHTML() {
+    return events.map((ev) => {
+      const m = parseFloat(ev.point_multiplier);
+      const label = Number.isInteger(m) ? `${m}` : m.toFixed(1);
+      const endStr = ev.end_date ? `${ev.end_date}T23:59:59` : null;
+      const endMs = endStr ? new Date(endStr).getTime() : null;
+      let countdownHtml = "";
+      if (endMs) {
+        const diff = endMs - Date.now();
+        if (diff > 0) {
+          const totalSec = Math.floor(diff / 1000);
+          const d = Math.floor(totalSec / 86400);
+          const h = Math.floor((totalSec % 86400) / 3600);
+          const min = Math.floor((totalSec % 3600) / 60);
+          const sec = totalSec % 60;
+          const timeStr = d > 0
+            ? `${d}天 ${String(h).padStart(2,"0")}:${String(min).padStart(2,"0")}:${String(sec).padStart(2,"0")}`
+            : `${String(h).padStart(2,"0")}:${String(min).padStart(2,"0")}:${String(sec).padStart(2,"0")}`;
+          countdownHtml = `<span class="multiplier-countdown">⏳ 剩餘 ${timeStr}</span>`;
+        } else {
+          countdownHtml = `<span class="multiplier-countdown">活動已結束</span>`;
+        }
+      }
+      return `<div class="multiplier-banner-item">
+        <span class="multiplier-badge">✨ 點數 × ${label}</span>
+        <span class="multiplier-title">${ev.title || "點數加倍活動"}</span>
+        ${countdownHtml}
+      </div>`;
+    }).join("");
+  }
+
+  banner.innerHTML = `<div class="multiplier-banner">${buildHTML()}</div>`;
+
+  // tick every second to update countdowns
+  _multiplierTimerHandle = setInterval(() => {
+    const inner = banner.querySelector(".multiplier-banner");
+    if (!inner) { clearInterval(_multiplierTimerHandle); _multiplierTimerHandle = null; return; }
+    inner.innerHTML = buildHTML();
+  }, 1000);
+}
+// ──────────────────────────────────────────────────────────────────────────────
+
   const now = new Date();
   const month = String(now.getMonth() + 1).padStart(2, "0");
   const day = String(now.getDate()).padStart(2, "0");
@@ -923,6 +986,7 @@ function renderQuests() {
   if (!list) return;
   list.innerHTML = "";
   if (nav) nav.innerHTML = "";
+  renderMultiplierBanner();
 
   const quests = getVisibleQuests();
   const questStates = state.progress.quest_states || {};
