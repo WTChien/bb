@@ -39,6 +39,7 @@
   activeAdminQuestTab: "list",
   activeEventAdminTab: "create",
   activeMallTab: "shop",
+  gachaPity: { bronze: 0, silver: 0, gold: 0, pity_limit: 10 },
   eventSchedules: [],
   importedEventQuests: [],
   wishes: [],
@@ -53,6 +54,41 @@ const ADMIN_PASSPHRASE = "tim0403";
 const SESSION_KEY = "love_quest_admin_session";
 const DEFAULT_USER_ID = "郭芸甄";
 const DEFAULT_ADMIN_ID = "admin";
+const GACHA_CHESTS = {
+  bronze: {
+    label: "銅寶箱",
+    icon: "🥉",
+    cost: 200,
+    pool: [
+      { rank: "SSS", points: 1440, rate: 1 },
+      { rank: "S", points: 250, rate: 10 },
+      { rank: "A", points: 100, rate: 39 },
+      { rank: "B", points: 40, rate: 50 },
+    ],
+  },
+  silver: {
+    label: "銀寶箱",
+    icon: "🥈",
+    cost: 500,
+    pool: [
+      { rank: "SSS", points: 3600, rate: 2 },
+      { rank: "S", points: 600, rate: 15 },
+      { rank: "A", points: 250, rate: 33 },
+      { rank: "B", points: 100, rate: 50 },
+    ],
+  },
+  gold: {
+    label: "金寶箱",
+    icon: "🥇",
+    cost: 1000,
+    pool: [
+      { rank: "SSS", points: 7200, rate: 3 },
+      { rank: "S", points: 1500, rate: 20 },
+      { rank: "A", points: 600, rate: 37 },
+      { rank: "B", points: 200, rate: 40 },
+    ],
+  },
+};
 let globalLoadingCount = 0;
 
 const $ = (selector) => document.querySelector(selector);
@@ -486,6 +522,7 @@ function applyMallTabVisibility() {
   const rewardFormPanel = $("#admin-reward-form-panel");
   const giftDispatchPanel = $("#admin-gift-dispatch-panel");
   const rewardBoard = $("#mall-reward-board");
+  const gachaBoard = $("#mall-gacha-board");
   const adminClaimsBoard = $("#admin-claims-board");
   const adminGiftHistoryBoard = $("#admin-gift-history-board");
   const historyBoard = $("#player-claim-history-board");
@@ -493,16 +530,18 @@ function applyMallTabVisibility() {
 
   if (!isAdmin) {
     const showHistory = state.activeMallTab === "history";
+    const showGacha = state.activeMallTab === "gacha";
     rewardFormPanel?.classList.add("is-hidden");
     giftDispatchPanel?.classList.add("is-hidden");
     adminClaimsBoard?.classList.add("is-hidden");
     adminGiftHistoryBoard?.classList.add("is-hidden");
-    rewardBoard?.classList.toggle("is-hidden", showHistory);
+    rewardBoard?.classList.toggle("is-hidden", showHistory || showGacha);
     historyBoard?.classList.toggle("is-hidden", !showHistory);
+    gachaBoard?.classList.toggle("is-hidden", !showGacha);
     return;
   }
 
-  const validAdminTabs = new Set(["shop", "create", "dispatch", "claims", "gift-history"]);
+  const validAdminTabs = new Set(["shop", "create", "dispatch", "claims", "gift-history", "gacha"]);
   if (!validAdminTabs.has(state.activeMallTab)) {
     state.activeMallTab = "shop";
   }
@@ -510,6 +549,7 @@ function applyMallTabVisibility() {
   rewardFormPanel?.classList.toggle("is-hidden", state.activeMallTab !== "create");
   giftDispatchPanel?.classList.toggle("is-hidden", state.activeMallTab !== "dispatch");
   rewardBoard?.classList.toggle("is-hidden", state.activeMallTab !== "shop");
+  gachaBoard?.classList.toggle("is-hidden", state.activeMallTab !== "gacha");
   adminClaimsBoard?.classList.toggle("is-hidden", state.activeMallTab !== "claims");
   adminGiftHistoryBoard?.classList.toggle("is-hidden", state.activeMallTab !== "gift-history");
   historyBoard?.classList.add("is-hidden");
@@ -524,6 +564,7 @@ function renderMallNav() {
   const tabs = isAdmin
     ? [
         { key: "shop", label: "獎勵商城", icon: "🎁", count: state.rewards.length },
+        { key: "gacha", label: "寶箱抽獎", icon: "🎲" },
         { key: "create", label: "新增獎勵", icon: "🛠️" },
         { key: "dispatch", label: "派發點數", icon: "💰" },
         { key: "claims", label: "兌換管理", icon: "📦", count: state.claims.length },
@@ -531,6 +572,7 @@ function renderMallNav() {
       ]
     : [
         { key: "shop", label: "獎勵商城", icon: "🎁", count: state.rewards.length },
+        { key: "gacha", label: "寶箱抽獎", icon: "🎲" },
         { key: "history", label: "兌換歷史", icon: "🧾", count: state.playerClaims.length },
       ];
 
@@ -1242,6 +1284,94 @@ function renderRewards() {
   });
 }
 
+function openGachaModal(title, html) {
+  const modal = $("#gacha-modal");
+  const titleEl = $("#gacha-modal-title");
+  const bodyEl = $("#gacha-modal-body");
+  if (!modal || !titleEl || !bodyEl) return;
+  titleEl.textContent = title;
+  bodyEl.innerHTML = html;
+  modal.classList.remove("is-hidden");
+}
+
+function closeGachaModal() {
+  $("#gacha-modal")?.classList.add("is-hidden");
+}
+
+function renderGachaBoard() {
+  const list = $("#gacha-list");
+  if (!list) return;
+  list.innerHTML = "";
+
+  const pityLimit = Number(state.gachaPity?.pity_limit || 10);
+  Object.entries(GACHA_CHESTS).forEach(([key, chest]) => {
+    const pity = Number(state.gachaPity?.[key] || 0);
+    const remain = Math.max(0, pityLimit - pity);
+    const card = document.createElement("article");
+    card.className = "gacha-card";
+    card.innerHTML = `
+      <div class="gacha-card-head">
+        <strong>${chest.icon} ${chest.label}</strong>
+        <span class="pill">${chest.cost} 點</span>
+      </div>
+      <div class="muted">保底進度：${pity}/${pityLimit}（剩餘 ${remain} 抽）</div>
+      <div class="review-actions">
+        <button class="btn-wood btn-sm" type="button" data-gacha-prob="${key}">查看機率</button>
+        <button class="btn-wood btn-sm btn-accent" type="button" data-gacha-draw="${key}">點擊抽獎</button>
+      </div>
+    `;
+    list.appendChild(card);
+  });
+}
+
+async function onGachaListClick(event) {
+  const probType = event.target.getAttribute("data-gacha-prob");
+  const drawType = event.target.getAttribute("data-gacha-draw");
+  if (!probType && !drawType) return;
+
+  if (probType) {
+    const chest = GACHA_CHESTS[probType];
+    if (!chest) return;
+    const rows = chest.pool
+      .map((item) => `<tr><td>${item.rank}</td><td>${item.points}</td><td>${item.rate}%</td></tr>`)
+      .join("");
+    openGachaModal(
+      `${chest.label} 機率表`,
+      `<table class="gacha-prob-table"><thead><tr><th>等級</th><th>點數</th><th>機率</th></tr></thead><tbody>${rows}</tbody></table>`
+    );
+    return;
+  }
+
+  if (drawType) {
+    const btn = event.target.closest("button") || event.target;
+    btnLoading(btn);
+    try {
+      const result = await api(`/api/gacha/draw/${encodeURIComponent(state.userId)}`, {
+        method: "POST",
+        body: JSON.stringify({ chest_type: drawType }),
+      });
+      state.progress.points = Number(result.points || state.progress.points || 0);
+      state.gachaPity = {
+        ...state.gachaPity,
+        [drawType]: Number(result.pity_after || 0),
+      };
+      renderStats();
+      renderGachaBoard();
+      const reward = result.reward || { rank: "B", points: 0 };
+      const guaranteedHtml = result.guaranteed ? '<div class="gacha-result-guaranteed">保底觸發！</div>' : "";
+      openGachaModal(
+        `${GACHA_CHESTS[drawType]?.label || "寶箱"} 抽獎結果`,
+        `<div class="gacha-result-wrap"><div class="gacha-result-rank">${reward.rank}</div><div class="gacha-result-points">獲得 ${reward.points} 點</div>${guaranteedHtml}<div class="muted">目前保底：${result.pity_after || 0}/${state.gachaPity.pity_limit || 10}</div></div>`
+      );
+      setMessage(`抽獎成功！獲得 ${reward.rank}（+${reward.points} 點）`);
+    } catch (err) {
+      setMessage(err.message, true);
+    } finally {
+      btnRestore(btn);
+    }
+  }
+}
+
 function renderAnnouncements() {
   const board = $("#announcements-board");
   const list = $("#announcement-list");
@@ -1541,13 +1671,14 @@ async function refreshAll() {
     const activeJournalDate = $("#journal-date")?.value || state.dailyJournal.log_date || todayIso();
 
     const questsPath = state.role === "admin" ? "/api/quests?include_future=true" : "/api/quests";
-    const [progress, quests, rewards, announcements, giftboxMails, playerClaims] = await Promise.all([
+    const [progress, quests, rewards, announcements, giftboxMails, playerClaims, gachaPity] = await Promise.all([
       api(`/api/progress/${encodeURIComponent(state.userId)}`),
       api(questsPath),
       api("/api/rewards"),
       api("/api/announcements"),
       api(`/api/giftbox/${encodeURIComponent(state.userId)}`),
       api(`/api/claims/${encodeURIComponent(state.userId)}`),
+      api(`/api/gacha/pity/${encodeURIComponent(state.userId)}`),
     ]);
 
     state.progress = progress;
@@ -1556,6 +1687,12 @@ async function refreshAll() {
     state.announcements = announcements;
     state.giftboxMails = giftboxMails;
     state.playerClaims = playerClaims;
+    state.gachaPity = {
+      bronze: Number(gachaPity?.bronze || 0),
+      silver: Number(gachaPity?.silver || 0),
+      gold: Number(gachaPity?.gold || 0),
+      pity_limit: Number(gachaPity?.pity_limit || 10),
+    };
 
     if (state.role === "admin") {
       const [claims, submissions, templates, settings, deleted, giftHistory, eventSchedules] = await Promise.all([
@@ -1621,6 +1758,7 @@ async function refreshAll() {
     renderStats();
     renderQuests();
     renderRewards();
+    renderGachaBoard();
     renderClaims();
     renderPlayerClaimHistory();
     renderMallNav();
@@ -2738,6 +2876,11 @@ async function boot() {
   $("#admin-quest-nav")?.addEventListener("click", onAdminQuestNavClick);
   $("#mall-nav")?.addEventListener("click", onMallNavClick);
   $("#reward-list").addEventListener("click", onListClick);
+  $("#gacha-list")?.addEventListener("click", onGachaListClick);
+  $("#gacha-modal-close")?.addEventListener("click", closeGachaModal);
+  $("#gacha-modal")?.addEventListener("click", (event) => {
+    if (event.target?.id === "gacha-modal") closeGachaModal();
+  });
   $("#announcement-list").addEventListener("click", async (event) => {
     const delId = event.target.closest("[data-delete-announcement]")?.getAttribute("data-delete-announcement");
     if (!delId) return;

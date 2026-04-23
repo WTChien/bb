@@ -135,6 +135,10 @@ class WishCreate(BaseModel):
     note: str = Field(default="", max_length=300)
 
 
+class GachaDrawRequest(BaseModel):
+    chest_type: str = Field(pattern="^(bronze|silver|gold)$")
+
+
 load_dotenv()
 project_root = Path(__file__).resolve().parents[1]
 
@@ -388,6 +392,19 @@ def upload_proof_image(file: UploadFile = File(...)) -> dict[str, str]:
 @app.get("/api/progress/{user_id}")
 def get_progress(user_id: str) -> dict:
     return service.get_progress(user_id)
+
+
+@app.get("/api/gacha/pity/{user_id}")
+def get_gacha_pity(user_id: str) -> dict:
+    return service.get_gacha_pity(user_id)
+
+
+@app.post("/api/gacha/draw/{user_id}")
+def draw_gacha(user_id: str, payload: GachaDrawRequest) -> dict:
+    result = service.draw_gacha(user_id=user_id, chest_type=payload.chest_type)
+    if not result.get("ok"):
+        raise HTTPException(status_code=400, detail={"message": result.get("message", "抽獎失敗")})
+    return result
 
 
 @app.post("/api/quests/{quest_id}/accept/{user_id}")

@@ -27,6 +27,38 @@ class ActionResult:
     points: int
 
 
+GACHA_PITY_LIMIT = 10
+GACHA_CHEST_CONFIG: dict[str, dict[str, Any]] = {
+    "bronze": {
+        "cost": 200,
+        "pool": [
+            {"rank": "SSS", "points": 1440, "rate": 0.01},
+            {"rank": "S", "points": 250, "rate": 0.10},
+            {"rank": "A", "points": 100, "rate": 0.39},
+            {"rank": "B", "points": 40, "rate": 0.50},
+        ],
+    },
+    "silver": {
+        "cost": 500,
+        "pool": [
+            {"rank": "SSS", "points": 3600, "rate": 0.02},
+            {"rank": "S", "points": 600, "rate": 0.15},
+            {"rank": "A", "points": 250, "rate": 0.33},
+            {"rank": "B", "points": 100, "rate": 0.50},
+        ],
+    },
+    "gold": {
+        "cost": 1000,
+        "pool": [
+            {"rank": "SSS", "points": 7200, "rate": 0.03},
+            {"rank": "S", "points": 1500, "rate": 0.20},
+            {"rank": "A", "points": 600, "rate": 0.37},
+            {"rank": "B", "points": 200, "rate": 0.40},
+        ],
+    },
+}
+
+
 class FirestoreQuestService:
     def __init__(
         self,
@@ -528,6 +560,109 @@ class FirestoreQuestService:
 
     def _stats_ref(self, user_id: str):
         return self.db.collection("users").document(user_id).collection("meta").document("stats")
+
+    def _gacha_state_ref(self, user_id: str):
+        return self.db.collection("users").document(user_id).collection("meta").document("gacha_state")
+
+    @staticmethod
+    def _weighted_roll(pool: list[dict[str, Any]]) -> dict[str, Any]:
+        r = random.random()
+        acc = 0.0
+        for item in pool:
+            acc += float(item.get("rate", 0.0))
+            if r <= acc:
+                return item
+        return pool[-1]
+
+    def get_gacha_pity(self, user_id: str) -> dict[str, int]:
+        snapshot = self._gacha_state_ref(user_id).get()
+        data = snapshot.to_dict() if snapshot.exists else {}
+        return {
+            "bronze": int(data.get("bronze", 0)),
+            "silver": int(data.get("silver", 0)),
+            "gold": int(data.get("gold", 0)),
+            "pity_limit": GACHA_PITY_LIMIT,
+        }
+
+    def draw_gacha(self, user_id: str, chest_type: str) -> dict[str, Any]:
+        chest = GACHA_CHEST_CONFIG.get(chest_type)
+        if not chest:
+            return {"ok": False, "message": "寶箱類型無效"}
+
+        stats_ref = self._stats_ref(user_id)
+        gacha_ref = self._gacha_state_ref(user_id)
+        transaction = self.db.transaction()
+
+        @firestore.transactional
+        def _tx(transaction_obj):
+            stats_snapshot = stats_ref.get(transaction=transaction_obj)
+            gacha_snapshot = gacha_ref.get(transaction=transaction_obj)
+
+            stats = stats_snapshot.to_dict() if stats_snapshot.exists else {}
+            gacha_state = gacha_snapshot.to_dict() if gacha_snapshot.exists else {}
+
+            current_points = int(stats.get("points", 0))
+            chest_cost = int(chest["cost"])
+            if current_points < chest_cost:
+                return {
+                    "ok": False,
+                    "message": f"點數不足，{chest_type} 寶箱需要 {chest_cost} 點",
+                    "points": current_points,
+                }
+
+            current_pity = int(gacha_state.get(chest_type, 0))
+            next_count = current_pity + 1
+
+            guaranteed = next_count >= GACHA_PITY_LIMIT
+            if guaranteed:
+                reward = next((x for x in chest["pool"] if x.get("rank") == "SSS"), chest["pool"][0])
+            else:
+                reward = self._weighted_roll(chest["pool"])
+
+            is_sss = str(reward.get("rank", "")).upper() == "SSS"
+            next_pity = 0 if is_sss else next_count
+            new_points = current_points - chest_cost + int(reward.get("points", 0))
+
+            transaction_obj.set(stats_ref, {"points": new_points, "updated_at": SERVER_TIMESTAMP}, merge=True)
+            transaction_obj.set(gacha_ref, {chest_type: next_pity, "updated_at": SERVER_TIMESTAMP}, merge=True)
+
+            draw_log_ref = (
+                self.db.collection("users")
+                .document(user_id)
+                .collection("gacha_draws")
+                .document()
+            )
+            transaction_obj.set(
+                draw_log_ref,
+                {
+                    "chest_type": chest_type,
+                    "cost": chest_cost,
+                    "reward_rank": str(reward.get("rank", "B")),
+                    "reward_points": int(reward.get("points", 0)),
+                    "guaranteed": bool(guaranteed),
+                    "pity_before": current_pity,
+                    "pity_after": next_pity,
+                    "points_after": new_points,
+                    "created_at": SERVER_TIMESTAMP,
+                },
+            )
+
+            return {
+                "ok": True,
+                "message": "抽獎成功",
+                "chest_type": chest_type,
+                "cost": chest_cost,
+                "reward": {
+                    "rank": str(reward.get("rank", "B")),
+                    "points": int(reward.get("points", 0)),
+                },
+                "guaranteed": bool(guaranteed),
+                "pity_before": current_pity,
+                "pity_after": next_pity,
+                "points": new_points,
+            }
+
+        return _tx(transaction)
 
     def _extract_iso_date(self, value: Any) -> str:
         if isinstance(value, datetime):

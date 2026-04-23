@@ -926,6 +926,61 @@ textarea{resize:vertical;min-height:64px}
   cursor: default;
 }
 
+.gacha-card {
+  background: linear-gradient(180deg, #fff7ea 0%, #fff1db 100%);
+  border: 2px solid #e8c28c;
+  border-radius: 12px;
+  padding: 12px;
+  display: grid;
+  gap: 8px;
+  box-shadow: 0 3px 0 #d0a66f;
+}
+
+.gacha-card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.gacha-prob-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.gacha-prob-table th,
+.gacha-prob-table td {
+  text-align: left;
+  padding: 8px 6px;
+  border-bottom: 1px solid #efd9b8;
+}
+
+.gacha-result-wrap {
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+}
+
+.gacha-result-rank {
+  font-size: 2rem;
+  font-weight: 900;
+  color: #9a4f00;
+}
+
+.gacha-result-points {
+  font-size: 1.2rem;
+  font-weight: 800;
+}
+
+.gacha-result-guaranteed {
+  background: #ffe6b5;
+  color: #8a4600;
+  border: 1px solid #efb65a;
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-weight: 800;
+}
+
 /* ── Button loading spinner ── */
 @keyframes btn-spin {
   to { transform: rotate(360deg); }

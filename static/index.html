@@ -471,6 +471,13 @@
                 <div id="reward-list"></div>
               </div>
             </div>
+            <div id="mall-gacha-board" class="sign-board is-hidden">
+              <div class="sign-header"><img src="/img/nobg_ha_cheer.png?v=2" class="hd-icon" alt=""> 🎲 寶箱抽獎</div>
+              <div class="sign-body stack">
+                <p class="muted" style="margin:0">每種寶箱分開計算保底，10 抽保底 SSS；保底資料已同步後端（跨裝置共用）。</p>
+                <div id="gacha-list" class="list"></div>
+              </div>
+            </div>
             <div id="player-claim-history-board" class="sign-board">
               <div class="sign-header"><img src="/img/nobg_chii.png?v=2" class="hd-icon" alt=""> 🧾 兌換歷史紀錄</div>
               <div class="sign-body">
@@ -564,6 +571,18 @@
       </div>
     </div>
 
+    <div id="gacha-modal" class="confirm-modal is-hidden" role="dialog" aria-modal="true" aria-label="寶箱資訊">
+      <div class="confirm-panel sign-board">
+        <div class="sign-header">
+          <span id="gacha-modal-title">寶箱資訊</span>
+          <button id="gacha-modal-close" class="lightbox-close" type="button" aria-label="關閉">✖</button>
+        </div>
+        <div class="sign-body stack">
+          <div id="gacha-modal-body"></div>
+        </div>
+      </div>
+    </div>
+
     </div>
 
     <div id="global-loading" class="global-loading is-hidden" aria-live="polite" aria-busy="true">
@@ -573,6 +592,6 @@
       </div>
     </div>
 
-    <script src="/static/app.js?v=20260424j"></script>
+    <script src="/static/app.js?v=20260424k"></script>
   </body>
 </html>
