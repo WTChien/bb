@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Love Quest ✦ 愛的任務板</title>
-    <link rel="stylesheet" href="/static/styles.css?v=20260424h" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260424i" />
   </head>
   <body>
     <!-- sky layer -->
@@ -279,6 +279,9 @@
                       <div id="journal-completed-quests" class="list"></div>
                       <button id="save-journal-btn" class="btn-wood btn-sm btn-accent" type="submit">儲存今日日誌</button>
                     </form>
+                    <hr class="divider" />
+                    <div class="sign-subtitle">📖 過去的日誌</div>
+                    <div id="journal-history-list" class="list journal-history-list"></div>
                   </div>
                 </div>
                 <div id="admin-template-board" class="admin-form-panel is-hidden stack">
@@ -558,6 +561,40 @@
       </div>
     </div>
 
+    <div id="journal-detail-modal" class="journal-modal is-hidden" role="dialog" aria-modal="true" aria-label="日誌詳情">
+      <div class="journal-modal-panel sign-board">
+        <div class="sign-header">
+          <img src="/img/nobg_chii.png?v=2" class="hd-icon" alt=""> 📖 當天日誌
+          <button id="journal-detail-close" class="lightbox-close journal-detail-close-btn" type="button" aria-label="關閉">✖</button>
+        </div>
+        <div class="sign-body journal-modal-body">
+          <div class="journal-modal-deco" aria-hidden="true">
+            <img src="/img/nobg_ha_cheer.png?v=2" class="journal-modal-deco-img" alt="" />
+            <img src="/img/nobg_lion.png?v=2" class="journal-modal-deco-img is-small" alt="" />
+          </div>
+          <div class="journal-modal-content">
+            <p id="journal-detail-date" class="journal-modal-date">-</p>
+            <div id="journal-detail-place-wrap" class="journal-modal-place-wrap is-hidden">
+              <span class="journal-modal-label">📍 今天去了</span>
+              <p id="journal-detail-place" class="journal-modal-place"></p>
+            </div>
+            <div class="journal-modal-note-wrap">
+              <span class="journal-modal-label">📝 今日紀錄</span>
+              <p id="journal-detail-note" class="journal-modal-note"></p>
+            </div>
+            <div class="journal-modal-quests-wrap">
+              <span id="journal-detail-quests-title" class="journal-modal-label">✅ 完成任務</span>
+              <ul id="journal-detail-quests" class="journal-modal-quests"></ul>
+            </div>
+          </div>
+          <div class="journal-modal-deco" aria-hidden="true">
+            <img src="/img/nobg_3_nice.png?v=2" class="journal-modal-deco-img" alt="" />
+            <img src="/img/nobg_shisho.png?v=2" class="journal-modal-deco-img is-small" alt="" />
+          </div>
+        </div>
+      </div>
+    </div>
+
     <div id="confirm-modal" class="confirm-modal is-hidden" role="dialog" aria-modal="true" aria-label="確認">
       <div class="confirm-panel sign-board">
         <div class="sign-header">⚠ 提醒</div>
@@ -592,6 +629,6 @@
       </div>
     </div>
 
-    <script src="/static/app.js?v=20260424t"></script>
+    <script src="/static/app.js?v=20260424v"></script>
   </body>
 </html>

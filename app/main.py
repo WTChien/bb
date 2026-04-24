@@ -578,6 +578,11 @@ def list_completed_quests_by_date(user_id: str, date: str) -> list[dict]:
     return service.get_completed_quests_by_date(user_id=user_id, log_date=date)
 
 
+@app.get("/api/daily-journals/{user_id}")
+def list_daily_journals(user_id: str) -> list[dict]:
+    return service.list_daily_journals(user_id=user_id)
+
+
 @app.get("/api/daily-journal/{user_id}")
 def get_daily_journal(user_id: str, date: str) -> dict:
     return service.get_daily_journal(user_id=user_id, log_date=date)

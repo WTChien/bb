@@ -613,6 +613,68 @@ function closeGiftboxModal() {
   $("#giftbox-modal")?.classList.add("is-hidden");
 }
 
+function openDailyJournalModal(entry) {
+  const modal = $("#journal-detail-modal");
+  if (!modal || !entry) return;
+
+  const dateEl = $("#journal-detail-date");
+  const placeWrap = $("#journal-detail-place-wrap");
+  const placeEl = $("#journal-detail-place");
+  const noteEl = $("#journal-detail-note");
+  const questsTitleEl = $("#journal-detail-quests-title");
+  const questsListEl = $("#journal-detail-quests");
+
+  if (!dateEl || !placeWrap || !placeEl || !noteEl || !questsTitleEl || !questsListEl) return;
+
+  const completedQuests = Array.isArray(entry.completed_quests) ? entry.completed_quests : [];
+  const completedCount = entry.completed_quest_count ?? completedQuests.length;
+
+  dateEl.textContent = entry.log_date || todayIso();
+  if (entry.visited_place) {
+    placeWrap.classList.remove("is-hidden");
+    placeEl.textContent = entry.visited_place;
+  } else {
+    placeWrap.classList.add("is-hidden");
+    placeEl.textContent = "";
+  }
+
+  noteEl.textContent = entry.note || "這天沒有留下文字紀錄。";
+  questsTitleEl.textContent = `✅ 完成任務（${completedCount}）`;
+
+  questsListEl.innerHTML = "";
+  if (!completedQuests.length) {
+    const empty = document.createElement("li");
+    empty.className = "journal-modal-empty";
+    empty.textContent = "這天沒有勾選完成任務。";
+    questsListEl.appendChild(empty);
+  } else {
+    completedQuests.forEach((quest) => {
+      const li = document.createElement("li");
+      li.className = "journal-modal-quest-item";
+
+      const title = document.createElement("span");
+      title.textContent = quest?.title || "未命名任務";
+
+      const points = Number(quest?.points_awarded ?? quest?.points ?? 0);
+      const pts = document.createElement("span");
+      pts.className = "journal-modal-quest-points";
+      pts.textContent = `+${points} 點`;
+
+      li.appendChild(title);
+      li.appendChild(pts);
+      questsListEl.appendChild(li);
+    });
+  }
+
+  modal.classList.remove("is-hidden");
+  document.body.classList.add("modal-open");
+}
+
+function closeDailyJournalModal() {
+  $("#journal-detail-modal")?.classList.add("is-hidden");
+  document.body.classList.remove("modal-open");
+}
+
 function showConfirmModal(message) {
   const modal = $("#confirm-modal");
   const messageEl = $("#confirm-message");
@@ -835,6 +897,50 @@ async function loadDailyJournalByDate(logDate) {
   renderDailyJournal();
 }
 
+async function loadJournalHistory() {
+  const list = $("#journal-history-list");
+  if (!list) return;
+  list.innerHTML = '<div class="muted">載入中…</div>';
+  try {
+    const user = encodeURIComponent(state.userId || DEFAULT_USER_ID);
+    const entries = await api(`/api/daily-journals/${user}`);
+    renderJournalHistory(Array.isArray(entries) ? entries : []);
+  } catch {
+    list.innerHTML = '<div class="muted">無法載入歷史日誌。</div>';
+  }
+}
+
+function renderJournalHistory(entries) {
+  const list = $("#journal-history-list");
+  if (!list) return;
+  list.innerHTML = "";
+  if (!entries.length) {
+    list.innerHTML = '<div class="muted">還沒有任何日誌記錄。</div>';
+    return;
+  }
+  entries.forEach((entry) => {
+    const card = document.createElement("article");
+    card.className = "journal-history-card item";
+    const completedCount = entry.completed_quest_count ?? (entry.completed_quests?.length ?? 0);
+    const place = entry.visited_place ? `<span class="journal-hist-place">📍 ${entry.visited_place}</span>` : "";
+    const noteText = entry.note ? `<p class="journal-hist-note">${entry.note}</p>` : "";
+    const questBadge = completedCount > 0 ? `<span class="pill">完成 ${completedCount} 個任務</span>` : "";
+    card.innerHTML = `
+      <div class="item-head">
+        <strong class="journal-hist-date">${entry.log_date || ""}</strong>
+        ${questBadge}
+      </div>
+      ${place}
+      ${noteText}
+    `;
+    card.addEventListener("click", () => {
+      openDailyJournalModal(entry);
+      loadDailyJournalByDate(entry.log_date);
+    });
+    list.appendChild(card);
+  });
+}
+
 async function saveDailyJournal(event) {
   event.preventDefault();
   const btn = event.target.querySelector('button[type="submit"]');
@@ -863,6 +969,7 @@ async function saveDailyJournal(event) {
     };
     renderDailyJournal();
     setMessage(result.message || "每日日誌已儲存");
+    loadJournalHistory();
   } catch (err) {
     btnRestore(btn);
     setMessage(err.message, true);
@@ -1147,6 +1254,7 @@ function renderQuests() {
     const deadlineText = getDeadlineText(dueDate);
     const cat = getQuestCategory(q);
     const catLabel = CATEGORY_CONFIG[cat]?.label || "其他任務";
+    const questStatusText = { accepted: "已承接", submitted: "待審核", approved: "已完成", rejected: "已退回" };
 
     let actions = "";
     let selectHtml = "";
@@ -1208,7 +1316,7 @@ function renderQuests() {
         <div class="muted">難度：${difficultyLabel(q.difficulty)} ｜ 發布：${q.published_date || "-"} ｜ 截止：${dueDate || "-"}</div>
         <div class="deadline-left ${deadlineText === "已截止" ? "is-overdue" : ""}">距離截止還有：${deadlineText}</div>
         ${selectHtml}
-        ${questState ? `<div class="muted">狀態：<span class="pill quest-status ${questState}">${statusText[questState] || questState}</span></div>` : ""}
+        ${questState ? `<div class="muted">狀態：<span class="pill quest-status ${questState}">${questStatusText[questState] || questState}</span></div>` : ""}
         <div>${actions}</div>
       </div>
     `;
@@ -1882,6 +1990,7 @@ async function refreshAll() {
     renderAdminQuestNav();
     applyAdminQuestTabVisibility();
     await loadDailyJournalByDate(activeJournalDate);
+    await loadJournalHistory();
   } finally {
     restoreAllLoadingButtons();
     hideGlobalLoading();
@@ -1903,6 +2012,12 @@ function onAdminQuestNavClick(event) {
   state.activeAdminQuestTab = tab;
   renderAdminQuestNav();
   applyAdminQuestTabVisibility();
+
+  if (tab === "journal") {
+    const journalDate = $("#journal-date")?.value || todayIso();
+    loadDailyJournalByDate(journalDate);
+    loadJournalHistory();
+  }
 
   const targetId = tab === "create"
     ? "admin-quest-form-panel"
@@ -3119,6 +3234,7 @@ async function boot() {
   $("#giftbox-claim-all-btn").addEventListener("click", onGiftboxToolbarClick);
   $("#giftbox-read-all-btn").addEventListener("click", onGiftboxToolbarClick);
   $("#giftbox-delete-read-btn").addEventListener("click", onGiftboxToolbarClick);
+  $("#journal-detail-close")?.addEventListener("click", closeDailyJournalModal);
   $("#wish-form")?.addEventListener("submit", submitWish);
   $("#wish-list")?.addEventListener("click", onWishListClick);
   $("#event-schedule-form")?.addEventListener("submit", createEventSchedule);
@@ -3164,6 +3280,18 @@ async function boot() {
     }
     if (event.target.id === "giftbox-modal") {
       closeGiftboxModal();
+    }
+    if (event.target.id === "journal-detail-modal") {
+      closeDailyJournalModal();
+    }
+    if (event.target.id === "journal-detail-close") {
+      closeDailyJournalModal();
+    }
+  });
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      closeDailyJournalModal();
     }
   });
 }

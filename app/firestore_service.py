@@ -891,6 +891,27 @@ class FirestoreQuestService:
             "completed_quest_ids": completed_ids,
         }
 
+    def list_daily_journals(self, user_id: str) -> list[dict[str, Any]]:
+        docs = (
+            self.db.collection("users")
+            .document(user_id)
+            .collection("daily_logs")
+            .stream()
+        )
+        entries: list[dict[str, Any]] = []
+        for doc in docs:
+            data = doc.to_dict() or {}
+            completed_quests = data.get("completed_quests", [])
+            entries.append({
+                "log_date": str(data.get("log_date", doc.id)),
+                "visited_place": str(data.get("visited_place", "")),
+                "note": str(data.get("note", "")),
+                "completed_quests": completed_quests,
+                "completed_quest_count": len(completed_quests),
+            })
+        entries.sort(key=lambda x: str(x.get("log_date", "")), reverse=True)
+        return entries
+
     def upsert_daily_journal(self, user_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         log_date = str(payload.get("log_date", "")).strip()
         if not log_date:
